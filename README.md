@@ -1,150 +1,158 @@
-<p align="center">
-  <img src="assets/logo.png" alt="LinkCode Logo" width="150">
-</p>
+<div align="center">
+  <img src="assets/logo.png" alt="LinkCode" width="120">
+</div>
 
-<h1 align="center">LinkCode</h1>
+<div align="center">
 
-<p align="center">
-  <em>IM 里说句话，专属 Bot 主动来找你，背后绑定你的 AI Agent 进程。</em>
+```
+    ██╗     ██╗███╗   ██╗██╗  ██╗ ██████╗ ██████╗ ██████╗ ███████╗
+    ██║     ██║████╗  ██║██║ ██╔╝██╔════╝██╔═══██╗██╔══██╗██╔════╝
+    ██║     ██║██╔██╗ ██║█████╔╝ ██║     ██║   ██║██║  ██║█████╗
+    ██║     ██║██║╚██╗██║██╔═██╗ ██║     ██║   ██║██║  ██║██╔══╝
+    ███████╗██║██║ ╚████║██║  ██╗╚██████╗╚██████╔╝██████╔╝███████╗
+    ╚══════╝╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝
+```
+
+[![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=for-the-badge&logo=go&logoColor=white)]()
+[![WeCom](https://img.shields.io/badge/WeCom-企业微信-07C160?style=for-the-badge&logo=wechat&logoColor=white)]()
+[![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)]()
+
+</div>
+
+<br>
+
+<div align="center">
+  <em>在 IM 里说句话，专属 Bot 主动来找你，背后就是你的 AI Agent。</em>
   <br>
-  <em>A word in IM. A dedicated bot reaches out. An AI agent process runs behind it.</em>
-</p>
+  <em>Say a word in IM. A dedicated bot reaches out. An AI agent runs behind it.</em>
+</div>
+
+<br>
 
 ---
 
-## What is LinkCode / 这是什么
-
-LinkCode runs on your local machine. You talk to a WeCom (企业微信) bot, and behind the scenes a **Claude Code** process is spawned, bound to that bot. The chat window = the agent session. Chat history = agent logs.
-
-LinkCode 部署在你本机。你在企业微信跟 Bot 聊天，背后就是一个 Claude Code 进程在帮你干活。聊天窗即会话，聊天记录即日志。
-
 ```
-User ←→ WeCom Platform ←→ [WebSocket] ←→ LinkCode (your machine) ←→ Claude Code (subprocess)
-                                ↑
-                   wss://openws.work.weixin.qq.com
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                                                                              │
+│   $ ./linkcode -config configs/linkcode.yaml                                 │
+│   [INFO] MySQL connected                                                     │
+│   [INFO] control bot connected to WeCom                                      │
+│   [INFO] LinkCode is running.                                                │
+│                                                                              │
+│   # 用户在企业微信发 /start                                                    │
+│   [CTRL] reply: "欢迎使用 LinkCode！请选择操作..."                             │
+│                                                                              │
+│   # 用户选 1 → 创建新 Agent → 命名 "代码助手"                                  │
+│   [POOL] allocate bot Bot_2 → session_042                                    │
+│   [PROC] spawn Claude Code (pid=28471)                                       │
+│   [GATE] connect Bot_2 to wss://openws.work.weixin.qq.com                    │
+│                                                                              │
+│   # Bot "代码助手" 主动发来消息:                                               │
+│   "你好，我是你的 Claude Code「代码助手」"                                      │
+│                                                                              │
+│   # 用户和 Bot 对话                                                           │
+│   [ROUTE] session_042 ← "分析 /var/log/error.log"                             │
+│   [PROC] Claude Code → streaming response →                                  │
+│   [ROUTE] Bot → user: (实时流式输出)                                           │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-No public IP, no port forwarding, no tunneling. Your machine just needs outbound internet access.
+---
 
-不需要公网 IP、不需要端口映射、不需要内网穿透。你的机器只要能访问外网即可。
-
-## Key Features / 核心特性
-
-- **Menu-driven control bot** / **拨号菜单式总控 Bot** — `/start` to create agents, `/end` to stop them, stable and predictable
-- **Bot pool with encrypted storage** / **Bot 池化 + 加密存储** — Pre-register WeCom bot credentials via `/addbot`, AES-256-GCM encrypted in MySQL
-- **1:1 session isolation** / **1:1 会话隔离** — Each agent session gets its own WeCom bot identity, naturally isolating conversations
-- **Streaming output** / **流式输出** — Claude Code output streams chunk-by-chunk through Go channels to WeCom
-- **Session continuity** / **会话连续性** — Sessions persist in MySQL; process can sleep and resume via `--resume`
-- **Local admin panel** / **本地管理面板** — `http://127.0.0.1:18980` shows sessions, bots, and process status
-
-## Prerequisites / 依赖
-
-| What | Why |
-|------|-----|
-| Go 1.21+ | Runtime |
-| MySQL 8.0+ | Data storage |
-| Claude Code (CLI) | Agent engine (`claude` binary) |
-| WeCom AI Bots | IM channel (created manually in WeCom admin panel) |
-
-## Quick Start / 快速开始
+## ⚡ 开始使用
 
 ```bash
-# 1. Clone & build
-cd linkcode
-go build ./cmd/linkcode/
+# 交互式安装 (自动检测依赖)
+bash scripts/install.sh
 
-# 2. Create MySQL database
-mysql -u root -e "CREATE DATABASE linkcode CHARACTER SET utf8mb4"
+# 编辑配置
+vim configs/linkcode.yaml
 
-# 3. Edit configs/linkcode.yaml with your DB DSN and control bot credentials
-
-# 4. Run
-./linkcode -config configs/linkcode.yaml
+# 启动
+./bin/linkcode -config configs/linkcode.yaml
 ```
 
-## Setup Flow / 首次使用流程
+然后打开企业微信，给总控 Bot 发 `/start`。
+
+---
+
+## 🗺️ Roadmap
+
+| IM 平台 | 状态 | Agent 工具 | 状态 |
+|---------|:----:|-----------|:----:|
+| 企业微信 | ✅ | Claude Code | ✅ |
+| Telegram | 🔲 | Kimi Code | 🔲 |
+| Teams | 🔲 | | |
+
+> 扩展只需实现 `channel.Channel` 或 `agent.Runner` 接口，其余模块零改动。
+
+---
+
+## 💬 交互方式
+
+### 总控 Bot：拨号菜单
+
+给总控 Bot 发送 `/start` 进入菜单，回复数字选择操作：
 
 ```
-1. Create several AI Bots in WeCom admin panel, note each botId + secret
-   在企微管理后台创建若干 AI Bot，记录 botId 和 secret
+欢迎使用 LinkCode！请选择操作：
+1. 创建新 Agent
+2. 查看我的 Agent 列表
+3. 添加新 Bot
+4. 查看 Bot 池状态
+5. 结束 Agent
 
-2. Open WeCom, send /start to your control bot
-   在企微给总控 Bot 发 /start
-
-3. Select "Add Bot" → /addbot <name> <botId> <secret>
-   选择"添加新 Bot"，录入凭证
-
-4. Select "Create Agent" → name it → done!
-   选择"创建新 Agent" → 命名 → 完成
-
-5. The new worker bot will proactively message you
-   新的 Worker Bot 会主动找你说话
+请回复数字 1-5
+💡 引用本条消息后回复数字，选择更准确
 ```
 
-## Daily Use / 日常使用
+**推荐做法**：长按总控 Bot 的菜单消息 →「引用」→ 回复数字。引用消歧 100% 准确，不依赖对话顺序。
+
+### Worker Bot：自由对话 + 可选引用
+
+与 Worker Bot（Claude Code）自由对话。引用 Worker Bot 的消息回复时，引用内容会作为上下文传递给 Claude：
 
 ```
-You → /start to control bot
-Bot → Menu: 1.Create  2.List  3.Add Bot  4.Bot Pool  5.End
-
-You → 1
-Bot → Agent type? (1.Claude Code)
-You → 1
-Bot → Name your agent:
-You → 代码助手
-Bot → ✅ "代码助手" is ready. Bot "备用1" will message you shortly.
-
-Worker Bot → "你好，我是你的 Claude Code「代码助手」"
-You → (talk to the worker bot freely)
-Worker Bot → (Claude Code responses stream back)
-
-You → /end  → select session → done.
+[用户引用了以下消息]
+Claude 之前的回复内容
+[用户的新消息]
+用户的新消息内容
 ```
 
-## Commands / 指令
+Sessions are persisted via `--resume`. Reply to a dormant bot and it wakes up with full context.
 
-| Command | Description |
-|---------|-------------|
-| `/start` | Open main menu / 打开主菜单 |
-| `/end` | End an agent session / 结束 Agent 会话 |
-| `/list` | List active sessions / 列出活跃会话 |
-| `/addbot <name> <id> <secret>` | Register a bot into the pool / 录入 Bot 到池中 |
+---
 
-## Project Structure / 项目结构
+## 📂 项目结构
 
 ```
 linkcode/
 ├── cmd/
-│   ├── linkcode/main.go     # Main binary / 主程序
-│   └── devmsg/main.go       # Dev contact tool / 开发者联络工具
+│   ├── linkcode/        # 主程序入口
+│   └── devmsg/          # 开发用消息发送工具
 ├── internal/
-│   ├── gateway/             # WebSocket connection manager
-│   ├── controller/          # Control bot menu logic
-│   ├── botpool/             # Bot pool (allocate/recycle)
-│   ├── session/             # Session CRUD + binding
-│   ├── router/              # Bidirectional message routing
-│   ├── procman/             # Agent process manager (Claude Code subprocess)
-│   ├── admin/               # Web admin panel
-│   ├── store/               # MySQL data layer
-│   ├── channel/wecom/       # WeCom WebSocket implementation
-│   ├── agent/claude/        # Claude Code agent implementation
-│   └── crypto/              # AES encryption utilities
-├── assets/                  # Images, logos
-├── migrations/              # SQL DDL
-└── configs/                 # Configuration templates
+│   ├── gateway/         # 企微 WebSocket 连接管理
+│   ├── controller/      # 总控 Bot 菜单状态机
+│   ├── botpool/         # Bot 池（录入/分配/回收）
+│   ├── session/         # Session CRUD + 绑定关系
+│   ├── router/          # 消息双向路由（引用上下文传递）
+│   ├── procman/         # Claude Code 子进程管理
+│   ├── agent/claude/    # Claude Code Runner
+│   ├── channel/wecom/   # 企微 WebSocket 实现（含引用解析）
+│   ├── store/           # MySQL 数据层
+│   ├── crypto/          # AES 加密
+│   └── admin/           # Web 管理面板
+├── scripts/
+│   └── install.sh       # 一键安装脚本
+├── migrations/          # SQL DDL
+└── configs/             # 配置模板
 ```
 
-## MVP Scope / MVP 范围
+---
 
-| In scope ✅ | Out of scope ❌ |
-|-------------|----------------|
-| WeCom IM platform | Telegram / Discord / Slack |
-| Claude Code agent | Other agent types |
-| Menu-based control | Natural language parsing |
-| Text messages | Images / files |
-| Single-user deployment | Multi-tenant |
-| Manual bot registration | Dynamic bot creation API |
+<div align="center">
 
-## License / 协议
+**[LinkCode](https://github.com/mojinfu/linkcode)** · MIT License
 
-MIT
+</div>
