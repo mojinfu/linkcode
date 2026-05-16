@@ -2,11 +2,101 @@ package procman
 
 import (
 	"context"
+	"encoding/json"
 	"os/exec"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestStripANSI(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty", "", ""},
+		{"plain text", "hello world", "hello world"},
+		{"chinese text", "你好世界", "你好世界"},
+		{"markdown formatting", "**bold** and *italic*", "**bold** and *italic*"},
+		{"CSI color code", "\x1b[90mgray text\x1b[0m", "gray text"},
+		{"CSI multi-param", "\x1b[1;32mbold green\x1b[0m", "bold green"},
+		{"bare ESC sequence", "\x1b[2Jcleared", "cleared"},
+		{"mixed ANSI and text", "normal \x1b[1mbold\x1b[0m normal", "normal bold normal"},
+		{"code block with backticks", "```go\nfmt.Println(\"hi\")\n```", "```go\nfmt.Println(\"hi\")\n```"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripANSI(tt.input)
+			if got != tt.want {
+				t.Errorf("stripANSI(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// buildJSONLine constructs a valid JSON line with the given content fields.
+// The text is JSON-escaped so that control characters (like ESC) are properly encoded.
+func buildJSONLine(contentType, text string) []byte {
+	textJSON, _ := json.Marshal(text)
+	// json.Marshal returns "text", so we strip the quotes for embedding.
+	textVal := string(textJSON)
+
+	line := `{"type":"assistant","message":{"id":"abc","type":"message","role":"assistant","content":[{"type":"` + contentType + `","` + contentType + `":` + textVal + `}]}}`
+	return []byte(line)
+}
+
+func TestParseOutputLine_StripsANSIFromText(t *testing.T) {
+	// Simulate Claude output where text content contains ANSI escape codes.
+	// json.Unmarshal decodes JSON-escaped ESC bytes, then stripANSI removes them.
+	input := "normal \x1b[90mthinking...\x1b[0m response"
+	line := buildJSONLine("text", input)
+	chunk := parseOutputLine(line)
+	if chunk.Kind != "text" {
+		t.Fatalf("expected KindText, got %s", chunk.Kind)
+	}
+	if chunk.Content != "normal thinking... response" {
+		t.Errorf("ANSI not stripped: got %q", chunk.Content)
+	}
+}
+
+func TestParseOutputLine_StripsANSIFromThinking(t *testing.T) {
+	input := "\x1b[90manalyzing...\x1b[0m"
+	line := buildJSONLine("thinking", input)
+	chunk := parseOutputLine(line)
+	if chunk.Kind != "thinking" {
+		t.Fatalf("expected KindThinking, got %s", chunk.Kind)
+	}
+	if chunk.Content != "analyzing..." {
+		t.Errorf("ANSI not stripped from thinking content: got %q", chunk.Content)
+	}
+}
+
+func TestParseOutputLine_StripsANSIFromError(t *testing.T) {
+	contentJSON, _ := json.Marshal("\x1b[31mError: something went wrong\x1b[0m")
+	line := `{"type":"result","subtype":"error","result":` + string(contentJSON) + `}`
+	chunk := parseOutputLine([]byte(line))
+	if chunk.Kind != "error" {
+		t.Fatalf("expected KindError, got %s", chunk.Kind)
+	}
+	if chunk.Content != "Error: something went wrong" {
+		t.Errorf("ANSI not stripped from error content: got %q", chunk.Content)
+	}
+}
+
+func TestParseOutputLine_StripsANSIFromNonJSON(t *testing.T) {
+	// When JSON parsing fails, the raw line is used as KindText.
+	// ANSI stripping still applies to this fallback path.
+	rawLine := "\x1b[90mnot valid json at all\x1b[0m"
+	chunk := parseOutputLine([]byte(rawLine))
+	if chunk.Kind != "text" {
+		t.Fatalf("expected KindText, got %s", chunk.Kind)
+	}
+	if chunk.Content != "not valid json at all" {
+		t.Errorf("ANSI not stripped from non-JSON line: got %q", chunk.Content)
+	}
+}
 
 func TestExtractSessionID(t *testing.T) {
 	// Simulates the first init line from Claude's stream-json output.

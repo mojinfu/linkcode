@@ -11,11 +11,18 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
 	"sync"
 	"time"
 
 	"linkcode/internal/agent"
 )
+
+// ansiRE matches ANSI escape sequences (CSI, OSC, and bare ESC sequences).
+// CSI: ESC[ + optional parameters + final byte (0x40-0x7E)
+// OSC: ESC] + content + BEL (0x07) or ESC\ (ST)
+// Bare ESC: ESC followed by a single byte (not [ or ])
+var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b\][^\x1b]*\x1b\\|\x1b[^\[].`)
 
 // Process wraps a running agent subprocess.
 type Process struct {
@@ -258,10 +265,19 @@ func newUUID() string {
 		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
+// stripANSI removes ANSI escape sequences and isolated control characters from s.
+// This prevents terminal formatting codes from appearing as garbled text in IM clients.
+func stripANSI(s string) string {
+	if s == "" {
+		return s
+	}
+	return ansiRE.ReplaceAllString(s, "")
+}
+
 func parseOutputLine(line []byte) agent.OutputChunk {
 	var raw claudeStreamJSON
 	if err := json.Unmarshal(line, &raw); err != nil {
-		return agent.OutputChunk{Kind: agent.KindText, Content: string(line)}
+		return agent.OutputChunk{Kind: agent.KindText, Content: stripANSI(string(line))}
 	}
 
 	switch raw.Type {
@@ -272,11 +288,11 @@ func parseOutputLine(line []byte) agent.OutputChunk {
 			c := raw.Message.Content[0]
 			switch c.Type {
 			case "thinking":
-				return agent.OutputChunk{Kind: agent.KindThinking, Content: c.Thinking}
+				return agent.OutputChunk{Kind: agent.KindThinking, Content: stripANSI(c.Thinking)}
 			case "text":
-				return agent.OutputChunk{Kind: agent.KindText, Content: c.Text}
+				return agent.OutputChunk{Kind: agent.KindText, Content: stripANSI(c.Text)}
 			case "tool_use":
-				return agent.OutputChunk{Kind: agent.KindToolUse, Content: c.Text}
+				return agent.OutputChunk{Kind: agent.KindToolUse, Content: stripANSI(c.Text)}
 			default:
 				return agent.OutputChunk{Kind: agent.KindThinking}
 			}
@@ -284,10 +300,10 @@ func parseOutputLine(line []byte) agent.OutputChunk {
 		return agent.OutputChunk{Kind: agent.KindThinking}
 	case "result":
 		if raw.Subtype == "error" || raw.Subtype == "error_during_execution" {
-			return agent.OutputChunk{Kind: agent.KindError, Content: raw.Result}
+			return agent.OutputChunk{Kind: agent.KindError, Content: stripANSI(raw.Result)}
 		}
-		return agent.OutputChunk{Kind: agent.KindFinal, Content: raw.Result}
+		return agent.OutputChunk{Kind: agent.KindFinal, Content: stripANSI(raw.Result)}
 	default:
-		return agent.OutputChunk{Kind: agent.KindText, Content: raw.Result}
+		return agent.OutputChunk{Kind: agent.KindText, Content: stripANSI(raw.Result)}
 	}
 }
