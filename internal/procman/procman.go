@@ -39,7 +39,8 @@ func Start(ctx context.Context, claudePath, workDir, sessionID string) (*Process
 	if sessionID != "" {
 		args = append(args, "--resume", sessionID)
 	} else {
-		args = append(args, "--session-id", newUUID())
+		sessionID = newUUID()
+		args = append(args, "--session-id", sessionID)
 	}
 	args = append(args, "--output-format", "stream-json", "--verbose")
 

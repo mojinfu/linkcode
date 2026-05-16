@@ -1,0 +1,186 @@
+package procman
+
+import (
+	"context"
+	"os/exec"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestExtractSessionID(t *testing.T) {
+	// Simulates the first init line from Claude's stream-json output.
+	initLine := `{"type":"system","subtype":"init","session_id":"a1b2c3d4-e5f6-7890-abcd-ef1234567890","claude_code_version":"2.1.142"}`
+	sid := extractSessionID([]byte(initLine))
+	if sid != "a1b2c3d4-e5f6-7890-abcd-ef1234567890" {
+		t.Errorf("expected session_id from init line, got %q", sid)
+	}
+
+	// Non-init lines should return empty.
+	assistantLine := `{"type":"assistant","message":{"id":"abc","type":"message","role":"assistant","content":[{"type":"text","text":"hello"}]}}`
+	sid = extractSessionID([]byte(assistantLine))
+	if sid != "" {
+		t.Errorf("expected empty session_id from non-init line, got %q", sid)
+	}
+
+	// Garbage input should return empty.
+	sid = extractSessionID([]byte("not json"))
+	if sid != "" {
+		t.Errorf("expected empty session_id from garbage, got %q", sid)
+	}
+}
+
+func TestSessionID_NewSession_ReturnsUUIDImmediately(t *testing.T) {
+	// Simulate a process started with an empty sessionID (new session).
+	// The fix ensures p.sessionID is set to the generated UUID.
+	p := &Process{
+		sessionID: "deadbeef-dead-beef-dead-beefdeadbeef",
+		alive:     true,
+		cmd:       exec.Command("true"), // dummy
+	}
+
+	sid := p.SessionID()
+	if sid != "deadbeef-dead-beef-dead-beefdeadbeef" {
+		t.Errorf("expected generated UUID, got %q", sid)
+	}
+}
+
+func TestSessionID_ResumeSession_ReturnsPassedIDImmediately(t *testing.T) {
+	// Simulate a process started with a non-empty sessionID (resume).
+	p := &Process{
+		sessionID: "resume-session-uuid-12345",
+		alive:     true,
+		cmd:       exec.Command("true"),
+	}
+
+	sid := p.SessionID()
+	if sid != "resume-session-uuid-12345" {
+		t.Errorf("expected resume session UUID, got %q", sid)
+	}
+}
+
+func TestSessionID_ClaudeSessionIDTakesPrecedence(t *testing.T) {
+	// After readOutput extracts the session_id from the init line,
+	// claudeSessionID should take precedence over sessionID.
+	p := &Process{
+		sessionID:       "generated-uuid",
+		claudeSessionID: "extracted-from-init-uuid",
+		alive:           true,
+		cmd:             exec.Command("true"),
+	}
+
+	sid := p.SessionID()
+	if sid != "extracted-from-init-uuid" {
+		t.Errorf("expected claudeSessionID to take precedence, got %q", sid)
+	}
+}
+
+// waitClaudePath tries to find the claude binary; returns empty if not found.
+func findClaudePath() string {
+	for _, p := range []string{
+		"/Users/mojinfu/apps/claude/bin/claude",
+		"/usr/local/bin/claude",
+	} {
+		if _, err := exec.LookPath(p); err == nil {
+			return p
+		}
+	}
+	// Try generic PATH lookup.
+	if p, err := exec.LookPath("claude"); err == nil {
+		return p
+	}
+	return ""
+}
+
+func TestStart_NewSession_SessionIDIsNonEmpty(t *testing.T) {
+	claudePath := findClaudePath()
+	if claudePath == "" {
+		t.Skip("claude binary not found, skipping integration test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Start a new session (empty sessionID).
+	proc, err := Start(ctx, claudePath, "", "")
+	if err != nil {
+		t.Fatalf("Start() failed: %v", err)
+	}
+	defer proc.Stop()
+
+	// Immediately after Start returns, SessionID() must be non-empty.
+	// This is the core fix: without it, SessionID() returns "" due to a race condition.
+	sid := proc.SessionID()
+	if sid == "" {
+		t.Fatal("SessionID() returned empty string immediately after Start() — race condition not fixed")
+	}
+
+	// Verify it looks like a UUID (contains hyphens).
+	if !strings.Contains(sid, "-") {
+		t.Errorf("SessionID() = %q, expected a UUID-like value", sid)
+	}
+
+	t.Logf("SessionID immediately available: %s", sid)
+}
+
+func TestStart_ResumeSession_SessionIDReturnsPassedID(t *testing.T) {
+	claudePath := findClaudePath()
+	if claudePath == "" {
+		t.Skip("claude binary not found, skipping integration test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	resumeID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	proc, err := Start(ctx, claudePath, "", resumeID)
+	if err != nil {
+		t.Fatalf("Start() with resume ID failed: %v", err)
+	}
+	defer proc.Stop()
+
+	sid := proc.SessionID()
+	if sid != resumeID {
+		t.Errorf("SessionID() = %q, expected resume ID %q", sid, resumeID)
+	}
+}
+
+func TestStart_SendAndReceive(t *testing.T) {
+	claudePath := findClaudePath()
+	if claudePath == "" {
+		t.Skip("claude binary not found, skipping integration test")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	proc, err := Start(ctx, claudePath, "", "")
+	if err != nil {
+		t.Fatalf("Start() failed: %v", err)
+	}
+	defer proc.Stop()
+
+	sid := proc.SessionID()
+	if sid == "" {
+		t.Fatal("SessionID() returned empty")
+	}
+
+	outputCh, err := proc.Send(ctx, "Say exactly: hello world")
+	if err != nil {
+		t.Fatalf("Send() failed: %v", err)
+	}
+
+	var gotText bool
+	for chunk := range outputCh {
+		if chunk.Kind == "error" {
+			t.Logf("agent error: %s", chunk.Content)
+		}
+		if chunk.Kind == "text" && strings.Contains(strings.ToLower(chunk.Content), "hello world") {
+			gotText = true
+		}
+	}
+
+	if !gotText {
+		t.Error("did not get expected 'hello world' response from agent")
+	}
+}
