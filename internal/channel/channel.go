@@ -1,0 +1,71 @@
+// Package channel defines the abstraction for IM platform connections.
+// Each IM platform (WeCom, Telegram, Discord, etc.) implements this interface.
+package channel
+
+import (
+	"context"
+	"time"
+)
+
+// MessageType categorizes incoming messages.
+type MessageType string
+
+const (
+	MsgTypeText     MessageType = "text"
+	MsgTypeImage    MessageType = "image"
+	MsgTypeFile     MessageType = "file"
+	MsgTypeEvent    MessageType = "event"
+	MsgTypeEnterChat MessageType = "enter_chat"
+)
+
+// Message represents an incoming message from the IM platform.
+type Message struct {
+	ID        string
+	UserID    string
+	BotID     string
+	Content   string
+	MsgType   MessageType
+	Timestamp time.Time
+	ReqID     string // original request ID from platform, used for reply routing
+	ChatID    string // the chat ID for proactive messages
+	Raw       []byte
+}
+
+// MessageContent represents content to send back to the user.
+type MessageContent struct {
+	Text          string
+	ReplyToID     string
+	OriginalReqID string // if set, replies via aibot_respond_msg; otherwise uses aibot_send_msg
+	ChatID        string // required for proactive messages (aibot_send_msg)
+}
+
+// MessageHandler is called when a user message arrives.
+type MessageHandler func(msg Message)
+
+// EventHandler is called when a platform event occurs (e.g. enter_chat).
+type EventHandler func(event Message)
+
+// Channel represents a connection to an IM platform for a single Bot identity.
+// Each Bot (control bot or worker bot) gets its own Channel instance.
+type Channel interface {
+	// Connect establishes a persistent connection to the IM platform.
+	Connect(ctx context.Context) error
+
+	// SendMessage sends a message to a specific user.
+	SendMessage(ctx context.Context, userID string, content MessageContent) error
+
+	// OnMessage registers a handler for incoming user messages.
+	OnMessage(handler MessageHandler)
+
+	// OnEvent registers a handler for platform events (enter_chat, etc.).
+	OnEvent(handler EventHandler)
+
+	// Close gracefully closes the connection.
+	Close() error
+
+	// BotID returns the bot identifier on the IM platform.
+	BotID() string
+
+	// IsConnected returns whether the connection is currently active.
+	IsConnected() bool
+}
