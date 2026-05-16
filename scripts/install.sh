@@ -1,0 +1,282 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# LinkCode one-shot installer.
+# Usage: bash scripts/install.sh
+
+BOLD="$(tput bold 2>/dev/null || echo "")"
+DIM="$(tput dim 2>/dev/null || echo "")"
+GREEN="$(tput setaf 2 2>/dev/null || echo "")"
+YELLOW="$(tput setaf 3 2>/dev/null || echo "")"
+CYAN="$(tput setaf 6 2>/dev/null || echo "")"
+RESET="$(tput sgr0 2>/dev/null || echo "")"
+
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+CONFIG_FILE="$ROOT_DIR/configs/linkcode.yaml"
+DOCKER_COMPOSE_FILE="$ROOT_DIR/docker-compose.yml"
+BUILD_OUTPUT="$ROOT_DIR/bin/linkcode"
+
+# -- defaults ---------------------------------------------------------------
+DB_DSN="root:@tcp(127.0.0.1:3306)/linkcode?parseTime=true&multiStatements=true"
+ADMIN_ENABLED="true"
+ADMIN_BIND="127.0.0.1:18980"
+IDLE_TIMEOUT="30m"
+AGENT_TYPE="claude-code"
+
+CTRL_BOT_ID=""
+CTRL_BOT_SECRET=""
+CLAUDE_PATH=""
+
+MISSING_FIELDS=()
+
+# -- helpers ----------------------------------------------------------------
+say()       { printf "%b\n" "$@"; }
+header()    { printf "\n%b=== %s ===%b\n" "$BOLD$CYAN" "$1" "$RESET"; }
+success()   { printf "%b  ✓ %s%b\n" "$GREEN" "$1" "$RESET"; }
+warn()      { printf "%b  ⚠ %s%b\n" "$YELLOW" "$1" "$RESET"; }
+info()      { printf "%b  • %s%b\n" "$DIM" "$1" "$RESET"; }
+prompt()    { read -r -p "$(printf "%b  › %s: %b" "$BOLD" "$1" "$RESET")" "$2"; }
+prompt_default() {
+    local label="$1" var="$2" default="$3"
+    read -r -p "$(printf "%b  › %s [%s]: %b" "$BOLD" "$label" "$default" "$RESET")" "$var"
+    if [[ -z "${!var:-}" ]]; then
+        eval "$var=\$default"
+    fi
+}
+
+# -- prerequisite checks ----------------------------------------------------
+check_prereqs() {
+    header "Step 1: Checking prerequisites"
+
+    # Go
+    if command -v go &>/dev/null; then
+        success "Go $(go version | awk '{print $3}')"
+    else
+        warn "Go not found — install from https://go.dev/dl/"
+        MISSING_FIELDS+=("go (build tool)")
+    fi
+
+    # MySQL
+    if command -v mysql &>/dev/null && mysql -u root -e "SELECT 1" &>/dev/null 2>&1; then
+        success "MySQL (localhost, root)"
+    elif command -v docker &>/dev/null; then
+        warn "MySQL not reachable — will generate docker-compose.yml as fallback"
+    else
+        warn "MySQL not reachable and Docker not found — install MySQL or Docker first"
+        MISSING_FIELDS+=("MySQL (or Docker for containerized MySQL)")
+    fi
+
+    # Claude Code
+    if command -v claude &>/dev/null; then
+        CLAUDE_PATH="$(command -v claude)"
+        success "Claude Code CLI ($CLAUDE_PATH)"
+    elif [[ -x "/usr/local/bin/claude" ]]; then
+        CLAUDE_PATH="/usr/local/bin/claude"
+        success "Claude Code CLI ($CLAUDE_PATH)"
+    elif [[ -x "$HOME/apps/claude/bin/claude" ]]; then
+        CLAUDE_PATH="$HOME/apps/claude/bin/claude"
+        success "Claude Code CLI ($CLAUDE_PATH)"
+    else
+        warn "Claude Code CLI not found in PATH — you'll need to specify its path later"
+        info "  Download from https://claude.ai/download or install via npm: npm install -g @anthropic-ai/claude-code"
+    fi
+}
+
+# -- interactive config ------------------------------------------------------
+configure() {
+    header "Step 2: Configuration"
+    say "${DIM}  Press Enter to skip a field. Skipped fields must be filled manually after install.${RESET}"
+    echo ""
+
+    # --- Control Bot ---
+    say "${BOLD}  [Control Bot]${RESET} (总控 Bot — the main bot users talk to)"
+    prompt_default "Bot ID        " CTRL_BOT_ID ""
+    prompt_default "Secret        " CTRL_BOT_SECRET ""
+
+    if [[ -z "$CTRL_BOT_ID" || -z "$CTRL_BOT_SECRET" ]]; then
+        warn "Control Bot credentials incomplete"
+        info "  After install, edit: ${CONFIG_FILE}"
+        info "  Look for: control_bot.bot_id / control_bot.secret"
+        MISSING_FIELDS+=("control bot credentials (in configs/linkcode.yaml)")
+    fi
+    echo ""
+
+    # --- MySQL ---
+    say "${BOLD}  [MySQL]${RESET}"
+    prompt_default "DSN           " DB_DSN "$DB_DSN"
+    echo ""
+
+    # --- Claude Code ---
+    say "${BOLD}  [Claude Code]${RESET}"
+    prompt_default "Binary path   " CLAUDE_PATH "${CLAUDE_PATH:-claude}"
+    echo ""
+
+    # --- Admin ---
+    say "${BOLD}  [Admin Panel]${RESET} (localhost web dashboard)"
+    prompt_default "Enable? (y/n) " ADMIN_ENABLED "$ADMIN_ENABLED"
+    if [[ "$ADMIN_ENABLED" =~ ^[Yy] ]]; then
+        ADMIN_ENABLED="true"
+        prompt_default "Bind address  " ADMIN_BIND "$ADMIN_BIND"
+    else
+        ADMIN_ENABLED="false"
+    fi
+}
+
+# -- write config file -------------------------------------------------------
+write_config() {
+    header "Step 3: Writing configuration"
+
+    mkdir -p "$(dirname "$CONFIG_FILE")"
+
+    if [[ -f "$CONFIG_FILE" ]]; then
+        warn "$CONFIG_FILE already exists — backing up to ${CONFIG_FILE}.bak"
+        cp "$CONFIG_FILE" "${CONFIG_FILE}.bak"
+    fi
+
+    cat > "$CONFIG_FILE" <<YAMLEOF
+# LinkCode Configuration
+# Generated by install.sh — edit freely.
+
+# MySQL database connection.
+db:
+  dsn: "${DB_DSN}"
+  max_open_conns: 10
+  max_idle_conns: 5
+
+# Main control bot (总控 Bot).
+# REQUIRED: fill in if skipped during install.
+control_bot:
+  bot_id: "${CTRL_BOT_ID}"
+  secret: "${CTRL_BOT_SECRET}"
+
+# Agent process settings.
+agent:
+  default_type: "${AGENT_TYPE}"
+  idle_timeout: ${IDLE_TIMEOUT}
+  claude_code_path: "${CLAUDE_PATH}"
+  claude_work_dir: ""  # empty = current working directory
+
+# Local admin web panel (http://localhost:18980).
+admin:
+  enabled: ${ADMIN_ENABLED}
+  bind_addr: "${ADMIN_BIND}"
+
+# Encryption key for bot secrets stored in MySQL.
+# Leave empty to auto-generate on first run.
+encrypt_key: ""
+YAMLEOF
+
+    success "Config written: $CONFIG_FILE"
+}
+
+# -- docker-compose for MySQL ------------------------------------------------
+maybe_write_docker_compose() {
+    if command -v mysql &>/dev/null && mysql -u root -e "SELECT 1" &>/dev/null 2>&1; then
+        return 0  # MySQL is reachable, no need for docker
+    fi
+
+    if ! command -v docker &>/dev/null; then
+        return 0  # no Docker either, nothing we can do
+    fi
+
+    header "Step 3b: Generating docker-compose.yml for MySQL"
+
+    cat > "$DOCKER_COMPOSE_FILE" <<'DCOEOF'
+# LinkCode — MySQL container.
+# Use this if you don't have MySQL installed locally.
+#
+#   docker-compose up -d     # start MySQL in background
+#   docker-compose down      # stop and remove container
+
+version: "3.8"
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: linkcode-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      MYSQL_DATABASE: linkcode
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - linkcode_mysql_data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password
+
+volumes:
+  linkcode_mysql_data:
+DCOEOF
+
+    success "docker-compose.yml written: $DOCKER_COMPOSE_FILE"
+    info "  Run: docker-compose up -d    (to start MySQL)"
+    info "  Then re-run this script to proceed with build."
+}
+
+# -- build -------------------------------------------------------------------
+do_build() {
+    header "Step 4: Building"
+
+    cd "$ROOT_DIR"
+    mkdir -p "$(dirname "$BUILD_OUTPUT")"
+
+    if ! command -v go &>/dev/null; then
+        warn "Skipping build — Go not available"
+        return 0
+    fi
+
+    go build -o "$BUILD_OUTPUT" ./cmd/linkcode/
+    success "Binary: $BUILD_OUTPUT"
+}
+
+# -- done message ------------------------------------------------------------
+print_done() {
+    header "Done"
+
+    if [[ ${#MISSING_FIELDS[@]} -gt 0 ]]; then
+        echo ""
+        say "${BOLD}${YELLOW}  ⚠  Still need your attention:${RESET}"
+        for item in "${MISSING_FIELDS[@]}"; do
+            say "    - $item"
+        done
+    fi
+
+    echo ""
+    say "${BOLD}${GREEN}  ✓ LinkCode is ready.${RESET}"
+    echo ""
+    say "  Next steps:"
+    echo ""
+    say "  1. Review the config:"
+    say "       ${CYAN}vim ${CONFIG_FILE}${RESET}"
+    echo ""
+    if [[ -f "$DOCKER_COMPOSE_FILE" ]]; then
+        say "  2. Start MySQL (if using Docker):"
+        say "       ${CYAN}cd ${ROOT_DIR} && docker-compose up -d${RESET}"
+        echo ""
+        say "  3. Start LinkCode:"
+    else
+        say "  2. Start LinkCode:"
+    fi
+    say "       ${CYAN}${BUILD_OUTPUT} -config ${CONFIG_FILE}${RESET}"
+    echo ""
+    say "  3. Open WeCom, send /start to your control bot."
+    echo ""
+}
+
+# -- main --------------------------------------------------------------------
+main() {
+    say "${BOLD}${CYAN}"
+    say "  ╔══════════════════════════════════════╗"
+    say "  ║       LinkCode Installer            ║"
+    say "  ║    IM ↔ Agent 双向桥接系统           ║"
+    say "  ╚══════════════════════════════════════╝"
+    say "${RESET}"
+
+    check_prereqs
+    configure
+    write_config
+    maybe_write_docker_compose
+    do_build
+    print_done
+}
+
+main

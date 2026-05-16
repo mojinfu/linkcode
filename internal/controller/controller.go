@@ -62,6 +62,13 @@ func (c *Controller) HandleMessage(ctx context.Context, msg channel.Message) str
 	text := strings.TrimSpace(msg.Content)
 	userID := msg.UserID
 
+	// If the user quoted a bot message, detect the menu stage from the quote.
+	if msg.QuoteContent != "" {
+		if state := detectMenuStage(msg.QuoteContent); state != MenuNone {
+			c.setState(userID, state)
+		}
+	}
+
 	switch {
 	case strings.HasPrefix(text, "/start"):
 		return c.showMainMenu(userID)
@@ -97,7 +104,8 @@ func (c *Controller) showMainMenu(userID string) string {
 4. 查看 Bot 池状态
 5. 结束 Agent
 
-请回复数字 1-5`
+请回复数字 1-5
+💡 引用本条消息后回复数字，选择更准确`
 }
 
 func (c *Controller) handleMainMenuChoice(userID, text string) string {
@@ -116,7 +124,7 @@ func (c *Controller) handleMainMenuChoice(userID, text string) string {
 	case "5":
 		return c.handleEndList(userID)
 	default:
-		return "请回复数字 1-5，或发送 /start 重新开始"
+		return "请回复数字 1-5，或发送 /start 重新开始\n💡 试试引用本条消息后回复数字"
 	}
 }
 
@@ -273,7 +281,7 @@ func (c *Controller) handleEndList(userID string) string {
 		}
 		sb.WriteString(fmt.Sprintf("%d. %s (%s) - %s\n", i+1, s.Name, s.AgentType, status))
 	}
-	sb.WriteString("回复 0 取消")
+	sb.WriteString("回复 0 取消\n💡 引用本条消息后回复数字，选择更准确")
 	return sb.String()
 }
 
@@ -369,4 +377,20 @@ func (c *Controller) setState(userID string, state MenuState) {
 	} else {
 		c.userStates[userID] = &userState{state: state, updatedAt: time.Now()}
 	}
+}
+
+// detectMenuStage inspects quoted text to determine which menu the user is replying to.
+// Returns MenuNone if the quoted text doesn't match any known menu.
+func detectMenuStage(quotedText string) MenuState {
+	switch {
+	case strings.Contains(quotedText, "欢迎使用 LinkCode！请选择操作"):
+		return MenuMain
+	case strings.Contains(quotedText, "请选择 Agent 类型"):
+		return MenuCreateAgentType
+	case strings.Contains(quotedText, "请为这个 Agent 命名"):
+		return MenuCreateAgentName
+	case strings.Contains(quotedText, "请选择要结束的 Agent"):
+		return MenuEndAgentConfirm
+	}
+	return MenuNone
 }

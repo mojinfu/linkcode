@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -479,6 +480,11 @@ func (c *Channel) handleMsgCallback(env wecomEnvelope) {
 		msg.Content = "[文件]"
 	}
 
+	if body.Quote != nil {
+		msg.QuotedMsgType = channel.MessageType(body.Quote.MsgType)
+		msg.QuoteContent = extractQuoteContent(body.Quote)
+	}
+
 	if c.msgHandler != nil {
 		c.msgHandler(msg)
 	}
@@ -515,6 +521,26 @@ func (c *Channel) handleEventCallback(env wecomEnvelope) {
 func (c *Channel) nextReqID() string {
 	seq := atomic.AddInt64(&c.reqIDSeq, 1)
 	return fmt.Sprintf("linkcode_%d_%d", time.Now().UnixNano(), seq)
+}
+
+// extractQuoteContent extracts human-readable text from a quoted message.
+func extractQuoteContent(q *wecomQuote) string {
+	switch q.MsgType {
+	case "text":
+		return q.Text.Content
+	case "mixed":
+		var parts []string
+		for _, item := range q.Mixed.MsgItem {
+			if item.MsgType == "text" {
+				parts = append(parts, item.Text.Content)
+			}
+		}
+		return strings.Join(parts, "")
+	case "voice":
+		return q.Voice.Text
+	default:
+		return "" // image/file have no text
+	}
 }
 
 func mustMarshal(v interface{}) string {
@@ -555,8 +581,9 @@ type wecomMsgCallback struct {
 	Text       wecomText  `json:"text,omitempty"`
 	Image      wecomImage `json:"image,omitempty"`
 	Voice      wecomVoice `json:"voice,omitempty"`
-	Mixed      wecomMixed `json:"mixed,omitempty"`
-	File       wecomFile  `json:"file,omitempty"`
+	Mixed      wecomMixed  `json:"mixed,omitempty"`
+	File       wecomFile   `json:"file,omitempty"`
+	Quote      *wecomQuote `json:"quote,omitempty"`
 }
 
 type wecomEventCallback struct {
@@ -600,6 +627,15 @@ type wecomMixedItem struct {
 type wecomFile struct {
 	FileName string `json:"file_name"`
 	URL      string `json:"url"`
+}
+
+// wecomQuote represents a quoted message inside a WeCom callback.
+type wecomQuote struct {
+	MsgType string    `json:"msgtype"`
+	Text    wecomText  `json:"text,omitempty"`
+	Image   wecomImage `json:"image,omitempty"`
+	Voice   wecomVoice `json:"voice,omitempty"`
+	Mixed   wecomMixed `json:"mixed,omitempty"`
 }
 
 type wecomEvent struct {

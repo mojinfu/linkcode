@@ -72,8 +72,12 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 		return
 	}
 
-	// Save user message to history.
-	_ = r.sessionMgr.AddMessage(sess.ID, "user", msg.Content, string(msg.MsgType))
+	// Save user message to history, including quote context if present.
+	contentToSave := msg.Content
+	if msg.QuoteContent != "" {
+		contentToSave = fmt.Sprintf("[引用: %s] %s", msg.QuoteContent, msg.Content)
+	}
+	_ = r.sessionMgr.AddMessage(sess.ID, "user", contentToSave, string(msg.MsgType))
 
 	// Resume or start agent process.
 	var agentSess agent.Session
@@ -95,14 +99,22 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 		}
 		// Save the Claude session ID for future resumes.
 		if sid := agentSess.ClaudeSessionID(); sid != "" {
-			_ = r.sessionMgr.SetClaudeSessionID(sess.ID, sid)
+			if err := r.sessionMgr.SetClaudeSessionID(sess.ID, sid); err != nil {
+				log.Printf("[router] WARNING: failed to persist claude session ID for session %d: %v", sess.ID, err)
+			}
 		}
 	}
 
 	_ = r.sessionMgr.Touch(sess.ID)
 
+	// Build input, including quote context if the user quoted a previous message.
+	input := msg.Content
+	if msg.QuoteContent != "" {
+		input = fmt.Sprintf("[用户引用了以下消息]\n%s\n\n[用户的新消息]\n%s", msg.QuoteContent, msg.Content)
+	}
+
 	// Send input to agent and stream output back.
-	outputCh, err := agentSess.Send(ctx, msg.Content)
+	outputCh, err := agentSess.Send(ctx, input)
 	if err != nil {
 		log.Printf("[router] send to agent: %v", err)
 		r.sendReply(msg, "Agent 处理失败，请重试。")

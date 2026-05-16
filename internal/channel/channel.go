@@ -29,6 +29,10 @@ type Message struct {
 	ReqID     string // original request ID from platform, used for reply routing
 	ChatID    string // the chat ID for proactive messages
 	Raw       []byte
+
+	// Quote fields: populated when the user quotes a previous message.
+	QuoteContent  string      // text content of the quoted message, empty if no quote
+	QuotedMsgType MessageType // type of the quoted message (text, image, etc.)
 }
 
 // MessageContent represents content to send back to the user.

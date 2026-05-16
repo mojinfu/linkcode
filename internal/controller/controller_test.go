@@ -96,3 +96,94 @@ func TestHandleMessage_DirectAddbotFormatError(t *testing.T) {
 	}
 	t.Logf("/addbot (bad format): %s", reply)
 }
+
+func TestHandleMessage_QuoteMainMenu(t *testing.T) {
+	ctrl := &Controller{
+		userStates: make(map[string]*userState),
+	}
+
+	ctx := context.Background()
+	uid := "user-quote-1"
+
+	// Quote main menu text + reply "1" → should enter agent type selection.
+	msg := channel.Message{
+		UserID:       uid,
+		Content:      "1",
+		MsgType:      channel.MsgTypeText,
+		QuoteContent: "欢迎使用 LinkCode！请选择操作：\n1. 创建新 Agent",
+	}
+	reply := ctrl.HandleMessage(ctx, msg)
+	if !strings.Contains(reply, "请选择 Agent 类型") {
+		t.Errorf("quoting main menu + '1': expected agent type selection, got: %s", reply)
+	}
+}
+
+func TestHandleMessage_QuoteUnknown(t *testing.T) {
+	ctrl := &Controller{
+		userStates: make(map[string]*userState),
+	}
+
+	ctx := context.Background()
+	uid := "user-quote-2"
+
+	// Quote unrecognized text + "1" → fallback to state machine (shows main menu).
+	msg := channel.Message{
+		UserID:       uid,
+		Content:      "1",
+		MsgType:      channel.MsgTypeText,
+		QuoteContent: "这是一条随意的消息，不是菜单",
+	}
+	reply := ctrl.HandleMessage(ctx, msg)
+	if !strings.Contains(reply, "欢迎使用 LinkCode") {
+		t.Errorf("quoting unknown + '1': expected fallback to main menu, got: %s", reply)
+	}
+}
+
+func TestHandleMessage_NoQuoteStillWorks(t *testing.T) {
+	ctrl := &Controller{
+		userStates: make(map[string]*userState),
+	}
+
+	ctx := context.Background()
+	uid := "user-noquote"
+
+	// /start then "1" without quote → should work as before.
+	msg := channel.Message{UserID: uid, Content: "/start", MsgType: channel.MsgTypeText}
+	ctrl.HandleMessage(ctx, msg)
+
+	msg = channel.Message{UserID: uid, Content: "1", MsgType: channel.MsgTypeText}
+	reply := ctrl.HandleMessage(ctx, msg)
+	if !strings.Contains(reply, "请选择 Agent 类型") {
+		t.Errorf("no quote + '1': expected agent type selection, got: %s", reply)
+	}
+}
+
+func TestHandleMessage_QuoteEndAgentMenu(t *testing.T) {
+	// Verify that quoting the end-agent menu text is recognized as MenuEndAgentConfirm.
+	quotedText := "请选择要结束的 Agent（回复数字）：\n1. 日志分析员 (claude-code) - 运行中"
+	state := detectMenuStage(quotedText)
+	if state != MenuEndAgentConfirm {
+		t.Errorf("quoting end-agent menu: expected MenuEndAgentConfirm, got %v", state)
+	}
+	t.Logf("end menu quote detection: state=%v", state)
+}
+
+func TestDetectMenuStage_AllMenus(t *testing.T) {
+	tests := []struct {
+		quotedText string
+		want       MenuState
+	}{
+		{"欢迎使用 LinkCode！请选择操作：\n1. 创建新 Agent", MenuMain},
+		{"请选择 Agent 类型：\n1. Claude Code", MenuCreateAgentType},
+		{"请为这个 Agent 命名（输入名称或回复\"跳过\"使用默认名称）", MenuCreateAgentName},
+		{"请选择要结束的 Agent（回复数字）：\n1. test", MenuEndAgentConfirm},
+		{"随机消息", MenuNone},
+		{"", MenuNone},
+	}
+	for _, tt := range tests {
+		got := detectMenuStage(tt.quotedText)
+		if got != tt.want {
+			t.Errorf("detectMenuStage(%q) = %v, want %v", tt.quotedText, got, tt.want)
+		}
+	}
+}
