@@ -29,6 +29,7 @@ CLAUDE.md
 Q&A.md
 项目介绍.md
 linkcodelogo.png
+cmd/streamtest/
 
 # Config secrets
 configs/.encrypt_key
