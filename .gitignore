@@ -1,6 +1,7 @@
 # Binaries
 /linkcode
 /devmsg
+/streamtest
 *.exe
 *.dll
 *.so
@@ -37,3 +38,4 @@ configs/linkcode.yaml
 # Data
 *.db
 *.sqlite
+问题记录*

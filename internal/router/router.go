@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
+	"time"
 
 	"linkcode/internal/agent"
 	"linkcode/internal/channel"
@@ -107,26 +109,59 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 		return
 	}
 
+	streamID := fmt.Sprintf("stream_%d", time.Now().UnixNano())
+	var builder strings.Builder
 	var fullResponse string
+
 	for chunk := range outputCh {
 		switch chunk.Kind {
 		case agent.KindError:
 			log.Printf("[router] agent error: %s", chunk.Content)
-			r.sendReply(msg, chunk.Content)
+			r.sendStreamReply(msg, chunk.Content, streamID, true)
 			return
 		case agent.KindText:
-			fullResponse += chunk.Content
-			r.sendReply(msg, chunk.Content)
+			builder.WriteString(chunk.Content)
+			// Send accumulated full content with Finish:false for progressive display.
+			r.sendStreamReply(msg, builder.String(), streamID, false)
 		case agent.KindFinal:
-			fullResponse += chunk.Content
+			fullResponse = chunk.Content
 		case agent.KindThinking, agent.KindToolUse:
-			fullResponse += chunk.Content
+			// Accumulate but don't stream to user.
 		}
 	}
 
+	// Send final frame with accumulated full content.
+	if builder.Len() > 0 {
+		r.sendStreamReply(msg, builder.String(), streamID, true)
+	} else {
+		r.sendStreamReply(msg, fullResponse, streamID, true)
+	}
+
 	// Save agent response to history.
-	if fullResponse != "" {
-		_ = r.sessionMgr.AddMessage(sess.ID, "agent", fullResponse, "text")
+	responseText := builder.String()
+	if responseText == "" {
+		responseText = fullResponse
+	}
+	if responseText != "" {
+		_ = r.sessionMgr.AddMessage(sess.ID, "agent", responseText, "text")
+	}
+}
+
+func (r *Router) sendStreamReply(msg channel.Message, text string, streamID string, finish bool) {
+	ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
+	if !ok {
+		log.Printf("[router] no channel for bot %s", msg.BotID)
+		return
+	}
+	if err := ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
+		Text:          text,
+		ReplyToID:     msg.ID,
+		OriginalReqID: msg.ReqID,
+		ChatID:        msg.ChatID,
+		StreamID:      streamID,
+		StreamFinish:  finish,
+	}); err != nil {
+		log.Printf("[router] send stream reply: %v", err)
 	}
 }
 

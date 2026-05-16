@@ -146,7 +146,15 @@ func (c *Channel) sendReply(content channel.MessageContent) error {
 		return fmt.Errorf("wecom: not connected")
 	}
 
-	streamID := fmt.Sprintf("stream_%d", time.Now().UnixNano())
+	streamID := content.StreamID
+	if streamID == "" {
+		streamID = fmt.Sprintf("stream_%d", time.Now().UnixNano())
+	}
+	finish := true
+	if content.StreamID != "" {
+		finish = content.StreamFinish
+	}
+
 	resp := wecomEnvelope{
 		Cmd: "aibot_respond_msg",
 		Headers: wecomHeaders{
@@ -156,7 +164,7 @@ func (c *Channel) sendReply(content channel.MessageContent) error {
 			MsgType: "stream",
 			Stream: wecomStream{
 				ID:      streamID,
-				Finish:  true,
+				Finish:  finish,
 				Content: content.Text,
 			},
 		})),

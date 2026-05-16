@@ -37,6 +37,8 @@ type MessageContent struct {
 	ReplyToID     string
 	OriginalReqID string // if set, replies via aibot_respond_msg; otherwise uses aibot_send_msg
 	ChatID        string // required for proactive messages (aibot_send_msg)
+	StreamID      string // if set, use this stream ID instead of generating a new one
+	StreamFinish  bool   // used with StreamID; the final frame should set this to true
 }
 
 // MessageHandler is called when a user message arrives.
