@@ -325,6 +325,13 @@ func (r *Router) sendStreamReply(msg channel.Message, text string, streamID stri
 		log.Printf("[router] no channel for bot %s", msg.BotID)
 		return
 	}
+	// Append a rotating indicator so the user can see the model is still streaming.
+	// Each frame picks a different character, creating an animation effect.
+	// When streaming ends (finish=true), the indicator disappears.
+	if !finish {
+		spinner := []string{"◐", "◓", "◑", "◒"}
+		text += " " + spinner[time.Now().UnixMilli()/200%int64(len(spinner))]
+	}
 	if err := ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
 		Text:          text,
 		ReplyToID:     msg.ID,
