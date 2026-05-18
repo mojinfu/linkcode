@@ -71,13 +71,24 @@ Then open WeCom, send `/start` to your control bot. Done.
 
 ## Roadmap
 
-| IM Platform | Status | Agent | Status |
-|-------------|:------:|-------|:------:|
-| WeCom (企业微信) | Done | Claude Code | Done |
-| Telegram | Planned | Kimi Code | Planned |
-| Teams | Planned | | |
+**IM Platforms**
 
-> Adding a platform = implementing `channel.Channel`. Adding an agent = implementing `agent.Runner`. Everything else stays.
+| Platform | Status |
+|----------|:------:|
+| WeCom (企业微信) | Done |
+| Telegram | Planned |
+| Teams | Planned |
+
+> Adding a platform = implementing `channel.Channel`.
+
+**Agent Tools**
+
+| Agent | Status |
+|-------|:------:|
+| Claude Code | Done |
+| Kimi Code | Planned |
+
+> Adding an agent = implementing `agent.Runner`. Everything else stays.
 
 ---
 
