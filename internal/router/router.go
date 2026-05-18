@@ -184,6 +184,15 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 		inputJSON = buildTextInput(input)
 	}
 
+	// Verify bot channel is healthy before launching agent.
+	// If the WebSocket is dead, tell the user immediately instead of making them
+	// wait for Claude to finish processing only to get a broken pipe.
+	ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
+	if !ok || !ch.IsConnected() {
+		r.sendReply(msg, "连接已断开，正在重连，请稍后重试。")
+		return
+	}
+
 	// Resume or start agent process.
 	agentSess, err := r.getOrCreateAgentSession(ctx, sess)
 	if err != nil {

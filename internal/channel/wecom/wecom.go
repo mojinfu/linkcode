@@ -33,6 +33,12 @@ const (
 	dialTimeout          = 10 * time.Second
 	authTimeout          = 10 * time.Second
 	ackTimeout           = 5 * time.Second
+
+	// readWait is the read deadline for ReadMessage.
+	// If no data (heartbeat response, message, etc.) arrives within this window,
+	// the connection is considered dead and will be reconnected.
+	// Set to 3x heartbeatInterval to tolerate transient network delays.
+	readWait = 90 * time.Second
 )
 
 // Channel implements channel.Channel for 企业微信.
@@ -170,7 +176,11 @@ func (c *Channel) sendReply(content channel.MessageContent) error {
 			},
 		})),
 	}
-	return c.conn.WriteJSON(resp)
+	if err := c.conn.WriteJSON(resp); err != nil {
+		c.markBrokenLocked()
+		return err
+	}
+	return nil
 }
 
 func (c *Channel) sendProactive(userID string, content channel.MessageContent) error {
@@ -207,6 +217,7 @@ func (c *Channel) sendProactive(userID string, content channel.MessageContent) e
 	c.ackMu.Unlock()
 
 	if err := c.conn.WriteJSON(resp); err != nil {
+		c.markBrokenLocked()
 		c.connMu.Unlock()
 		c.ackMu.Lock()
 		delete(c.pendingAcks, reqID)
@@ -301,7 +312,11 @@ func (c *Channel) connect() error {
 
 	log.Printf("[wecom] bot %s: authenticated successfully", c.botID)
 
-	conn.SetReadDeadline(time.Time{})
+	// Set initial read deadline. If the JSON heartbeat response doesn't
+	// arrive within readWait, the connection is considered dead and will
+	// be reconnected by readLoop.
+	conn.SetReadDeadline(time.Now().Add(readWait))
+
 	c.conn = conn
 	c.connected = true
 	return nil
@@ -338,7 +353,18 @@ func (c *Channel) sendPing() {
 	}
 	if err := c.conn.WriteJSON(ping); err != nil {
 		log.Printf("[wecom] bot %s: heartbeat write error: %v", c.botID, err)
+		c.markBrokenLocked()
 	}
+}
+
+// markBrokenLocked closes the current connection and marks it as disconnected.
+// Must be called with connMu held. The readLoop will pick up conn==nil and reconnect.
+func (c *Channel) markBrokenLocked() {
+	if c.conn != nil {
+		c.conn.Close()
+		c.conn = nil
+	}
+	c.connected = false
 }
 
 func (c *Channel) readLoop() {
@@ -372,6 +398,8 @@ func (c *Channel) readLoop() {
 			continue
 		}
 
+		// Set read deadline so a dead connection is detected within readWait.
+		conn.SetReadDeadline(time.Now().Add(readWait))
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
 			log.Printf("[wecom] bot %s: read error: %v", c.botID, err)
