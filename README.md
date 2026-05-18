@@ -31,32 +31,19 @@
 
 ---
 
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                                                                              │
-│   $ ./linkcode -config configs/linkcode.yaml                                 │
-│   [INFO] MySQL connected                                                     │
-│   [INFO] control bot connected to WeCom                                      │
-│   [INFO] LinkCode is running.                                                │
-│                                                                              │
-│   # 用户在企业微信发 /start                                                    │
-│   [CTRL] reply: "欢迎使用 LinkCode！请选择操作..."                             │
-│                                                                              │
-│   # 用户选 1 → 创建新 Agent → 命名 "代码助手"                                  │
-│   [POOL] allocate bot Bot_2 → session_042                                    │
-│   [PROC] spawn Claude Code (pid=28471)                                       │
-│   [GATE] connect Bot_2 to wss://openws.work.weixin.qq.com                    │
-│                                                                              │
-│   # Bot "代码助手" 主动发来消息:                                               │
-│   "你好，我是你的 Claude Code「代码助手」"                                      │
-│                                                                              │
-│   # 用户和 Bot 对话                                                           │
-│   [ROUTE] session_042 ← "分析 /var/log/error.log"                             │
-│   [PROC] Claude Code → streaming response →                                  │
-│   [ROUTE] Bot → user: (实时流式输出)                                           │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
+## 🎬 总控唤起：从一句话到一个专属 Bot
+
+<div align="center">
+  <img src="assets/demo-control.svg" alt="LinkCode 总控唤起流程">
+</div>
+
+<br>
+
+## 🎬 任务执行：让 Bot 动手操作你的电脑
+
+<div align="center">
+  <img src="assets/demo-task.svg" alt="LinkCode 任务执行流程">
+</div>
 
 ---
 
