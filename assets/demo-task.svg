@@ -1,181 +1,114 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 630" width="440" height="630">
-  <defs>
-    <linearGradient id="topBar" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#2C2C2C"/>
-      <stop offset="100%" stop-color="#1A1A1A"/>
-    </linearGradient>
-    <filter id="bubbleShadow">
-      <feDropShadow dx="0" dy="0.5" stdDeviation="0.5" flood-color="#000" flood-opacity="0.06"/>
-    </filter>
-    <clipPath id="screenClip">
-      <rect x="0" y="0" width="440" height="630" rx="12"/>
-    </clipPath>
-  </defs>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 570" width="440" height="570">
+  <!-- Terminal window border -->
+  <rect x="0" y="0" width="440" height="570" fill="#0D0D0D"/>
+  <rect x="0.5" y="0.5" width="439" height="569" fill="none" stroke="#2A2A2A" stroke-width="1"/>
 
-  <g clip-path="url(#screenClip)">
-    <!-- Chat background -->
-    <rect x="0" y="0" width="440" height="630" fill="#EDEDED"/>
+  <!-- Title bar -->
+  <rect x="0" y="0" width="440" height="30" fill="#151515"/>
+  <rect x="0" y="30" width="440" height="1" fill="#2A2A2A"/>
+  <circle cx="12" cy="15" r="5" fill="#444"/>
+  <circle cx="26" cy="15" r="5" fill="#444"/>
+  <circle cx="40" cy="15" r="5" fill="#444"/>
+  <text x="220" y="20" fill="#777" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="11" text-anchor="middle">DevHelper</text>
 
-    <!-- Top bar -->
-    <rect x="0" y="0" width="440" height="44" fill="url(#topBar)"/>
-    <rect x="0" y="44" width="440" height="0.5" fill="#000" opacity="0.3"/>
-    <g transform="translate(16,18)">
-      <rect x="0" y="6" width="2.5" height="2.5" rx="0.5" fill="#FFF" opacity="0.9"/>
-      <rect x="3.5" y="4" width="2.5" height="4.5" rx="0.5" fill="#FFF" opacity="0.9"/>
-      <rect x="7" y="1.5" width="2.5" height="7" rx="0.5" fill="#FFF" opacity="0.9"/>
-      <rect x="10.5" y="-0.5" width="2.5" height="9" rx="0.5" fill="#FFF" opacity="0.9"/>
-    </g>
-    <text x="220" y="28" fill="#FFF" font-family="system-ui,-apple-system,sans-serif" font-size="15" font-weight="600" text-anchor="middle" letter-spacing="0.5">DevHelper</text>
-    <!-- Online dot -->
-    <circle cx="395" cy="22" r="4" fill="#07C160"/>
-    <circle cx="395" cy="22" r="4" fill="#07C160" opacity="0.5">
-      <animate attributeName="r" values="4;7;4" dur="2s" repeatCount="indefinite"/>
-      <animate attributeName="opacity" values="0.5;0;0.5" dur="2s" repeatCount="indefinite"/>
+  <!-- ============================================ -->
+  <!-- Message 1: Bot greeting -->
+  <!-- ============================================ -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="0.5s" dur="0.35s" fill="freeze"/>
+    <animateTransform attributeName="transform" type="translate" from="0 6" to="0 0" begin="0.5s" dur="0.35s" fill="freeze"/>
+    <text x="24" y="52" fill="#555" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="10">12:03</text>
+    <text x="24" y="72" fill="#DDD" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="13">DevHelper: Hi! I'm your Claude Code "DevHelper".</text>
+    <text x="24" y="92" fill="#DDD" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="13">  What can I do for you?</text>
+  </g>
+
+  <!-- ============================================ -->
+  <!-- Message 2: User task -->
+  <!-- ============================================ -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="2.5s" dur="0.35s" fill="freeze"/>
+    <animateTransform attributeName="transform" type="translate" from="0 6" to="0 0" begin="2.5s" dur="0.35s" fill="freeze"/>
+    <text x="24" y="120" fill="#555" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="10">12:05</text>
+    <text x="24" y="140" fill="#999" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="13">You: Find a Xiaomi printer on my LAN and set it up</text>
+  </g>
+
+  <!-- Typing indicator -->
+  <text x="24" y="168" fill="#666" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="13" opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="4s" dur="0.25s" fill="freeze"/>
+    <animate attributeName="opacity" from="1" to="0" begin="5.5s" dur="0.25s" fill="freeze"/>
+    DevHelper: ...
+  </text>
+
+  <!-- ============================================ -->
+  <!-- Message 3: Bot scanning -->
+  <!-- ============================================ -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="6s" dur="0.35s" fill="freeze"/>
+    <animateTransform attributeName="transform" type="translate" from="0 6" to="0 0" begin="6s" dur="0.35s" fill="freeze"/>
+    <text x="24" y="196" fill="#555" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="10">12:05</text>
+    <text x="24" y="216" fill="#DDD" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="13">DevHelper: Scanning local network...</text>
+  </g>
+
+  <!-- ============================================ -->
+  <!-- Message 4: Bot found printer -->
+  <!-- ============================================ -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="8s" dur="0.35s" fill="freeze"/>
+    <animateTransform attributeName="transform" type="translate" from="0 6" to="0 0" begin="8s" dur="0.35s" fill="freeze"/>
+    <text x="24" y="244" fill="#555" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="10">12:05</text>
+    <text x="24" y="264" fill="#DDD" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="13">DevHelper: Found 1 device:</text>
+    <text x="24" y="286" fill="#DDD" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="13">  &#x25B8; Mi Wireless All-in-One Inkjet</text>
+    <text x="24" y="306" fill="#AAA" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="12">  192.168.0.35  &#x2014;  AirPrint ready</text>
+  </g>
+
+  <!-- ============================================ -->
+  <!-- Message 5: Bot installed driver -->
+  <!-- ============================================ -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="11s" dur="0.35s" fill="freeze"/>
+    <animateTransform attributeName="transform" type="translate" from="0 6" to="0 0" begin="11s" dur="0.35s" fill="freeze"/>
+    <text x="24" y="334" fill="#555" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="10">12:05</text>
+    <text x="24" y="354" fill="#DDD" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="13">DevHelper: Installing driver... OK</text>
+    <text x="24" y="374" fill="#DDD" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="13">  Printer ready!</text>
+  </g>
+
+  <!-- ============================================ -->
+  <!-- Message 6: User print order -->
+  <!-- ============================================ -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="14s" dur="0.35s" fill="freeze"/>
+    <animateTransform attributeName="transform" type="translate" from="0 6" to="0 0" begin="14s" dur="0.35s" fill="freeze"/>
+    <text x="24" y="402" fill="#555" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="10">12:06</text>
+    <text x="24" y="422" fill="#999" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="13">You: Print aaa.jpg from my desktop</text>
+  </g>
+
+  <!-- Typing indicator 2 -->
+  <text x="24" y="450" fill="#666" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="13" opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="15.5s" dur="0.25s" fill="freeze"/>
+    <animate attributeName="opacity" from="1" to="0" begin="17s" dur="0.25s" fill="freeze"/>
+    DevHelper: ...
+  </text>
+
+  <!-- ============================================ -->
+  <!-- Message 7: Bot print done -->
+  <!-- ============================================ -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="17.5s" dur="0.35s" fill="freeze"/>
+    <animateTransform attributeName="transform" type="translate" from="0 6" to="0 0" begin="17.5s" dur="0.35s" fill="freeze"/>
+    <text x="24" y="478" fill="#555" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="10">12:06</text>
+    <text x="24" y="498" fill="#DDD" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="13">DevHelper: Sent to printer OK</text>
+    <text x="24" y="518" fill="#AAA" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="12">  Job ID xiaomi-printer-43</text>
+  </g>
+
+  <!-- ============================================ -->
+  <!-- Printer status line -->
+  <!-- ============================================ -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="20s" dur="0.5s" fill="freeze"/>
+    <text x="24" y="546" fill="#AAA" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="12">  Xiaomi Printer</text>
+    <circle cx="156" cy="542" r="3" fill="#AAA">
+      <animate attributeName="opacity" values="1;0.2;1" dur="1.5s" repeatCount="indefinite"/>
     </circle>
-
-    <!-- ============================================ -->
-    <!-- Message 1: Bot greeting (moved from SVG A) -->
-    <!-- ============================================ -->
-    <g opacity="0">
-      <animate attributeName="opacity" from="0" to="1" begin="0.5s" dur="0.4s" fill="freeze"/>
-      <animateTransform attributeName="transform" type="translate" from="0 8" to="0 0" begin="0.5s" dur="0.4s" fill="freeze"/>
-      <!-- Avatar -->
-      <circle cx="28" cy="60" r="15" fill="#1485EE"/>
-      <text x="28" y="66" fill="#FFF" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="700" text-anchor="middle">D</text>
-      <!-- Bubble -->
-      <rect x="52" y="60" width="310" height="48" rx="6" fill="#FFF" filter="url(#bubbleShadow)"/>
-      <text x="66" y="80" fill="#333" font-family="system-ui,-apple-system,sans-serif" font-size="12.5">Hi! I'm your Claude Code "DevHelper".</text>
-      <text x="66" y="99" fill="#333" font-family="system-ui,-apple-system,sans-serif" font-size="12.5">What can I do for you?</text>
-      <text x="54" y="121" fill="#AAA" font-family="system-ui,-apple-system,sans-serif" font-size="9">12:03</text>
-    </g>
-
-    <!-- ============================================ -->
-    <!-- Message 2: User task -->
-    <!-- ============================================ -->
-    <g opacity="0">
-      <animate attributeName="opacity" from="0" to="1" begin="2.5s" dur="0.4s" fill="freeze"/>
-      <animateTransform attributeName="transform" type="translate" from="0 8" to="0 0" begin="2.5s" dur="0.4s" fill="freeze"/>
-      <rect x="200" y="135" width="224" height="48" rx="6" fill="#95EC69" filter="url(#bubbleShadow)"/>
-      <text x="212" y="155" fill="#1A1A1A" font-family="system-ui,-apple-system,sans-serif" font-size="12.5">Find a Xiaomi printer on my</text>
-      <text x="212" y="174" fill="#1A1A1A" font-family="system-ui,-apple-system,sans-serif" font-size="12.5">LAN and set it up</text>
-      <text x="424" y="195" fill="#AAA" font-family="system-ui,-apple-system,sans-serif" font-size="9" text-anchor="end">12:05</text>
-    </g>
-
-    <!-- Typing indicator -->
-    <g opacity="0">
-      <animate attributeName="opacity" from="0" to="1" begin="4s" dur="0.3s" fill="freeze"/>
-      <animate attributeName="opacity" from="1" to="0" begin="5.5s" dur="0.3s" fill="freeze"/>
-      <rect x="52" y="210" width="52" height="26" rx="6" fill="#FFF" filter="url(#bubbleShadow)"/>
-      <circle cx="67" cy="223" r="2.5" fill="#CCC">
-        <animate attributeName="opacity" values="0.3;1;0.3" dur="1s" repeatCount="indefinite"/>
-      </circle>
-      <circle cx="78" cy="223" r="2.5" fill="#CCC">
-        <animate attributeName="opacity" values="0.3;1;0.3" dur="1s" begin="0.25s" repeatCount="indefinite"/>
-      </circle>
-      <circle cx="89" cy="223" r="2.5" fill="#CCC">
-        <animate attributeName="opacity" values="0.3;1;0.3" dur="1s" begin="0.5s" repeatCount="indefinite"/>
-      </circle>
-    </g>
-
-    <!-- ============================================ -->
-    <!-- Message 3: Bot scanning -->
-    <!-- ============================================ -->
-    <g opacity="0">
-      <animate attributeName="opacity" from="0" to="1" begin="6s" dur="0.4s" fill="freeze"/>
-      <animateTransform attributeName="transform" type="translate" from="0 8" to="0 0" begin="6s" dur="0.4s" fill="freeze"/>
-      <circle cx="28" cy="210" r="15" fill="#1485EE"/>
-      <text x="28" y="216" fill="#FFF" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="700" text-anchor="middle">D</text>
-      <rect x="52" y="210" width="210" height="30" rx="6" fill="#FFF" filter="url(#bubbleShadow)"/>
-      <text x="66" y="230" fill="#333" font-family="system-ui,-apple-system,sans-serif" font-size="12.5">Scanning local network…</text>
-      <text x="54" y="253" fill="#AAA" font-family="system-ui,-apple-system,sans-serif" font-size="9">12:05</text>
-    </g>
-
-    <!-- ============================================ -->
-    <!-- Message 4: Bot found printer -->
-    <!-- ============================================ -->
-    <g opacity="0">
-      <animate attributeName="opacity" from="0" to="1" begin="8s" dur="0.4s" fill="freeze"/>
-      <animateTransform attributeName="transform" type="translate" from="0 8" to="0 0" begin="8s" dur="0.4s" fill="freeze"/>
-      <circle cx="28" cy="265" r="15" fill="#1485EE"/>
-      <text x="28" y="271" fill="#FFF" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="700" text-anchor="middle">D</text>
-      <rect x="52" y="265" width="310" height="64" rx="6" fill="#FFF" filter="url(#bubbleShadow)"/>
-      <text x="66" y="285" fill="#333" font-family="system-ui,-apple-system,sans-serif" font-size="12.5">Found 1 device:</text>
-      <text x="66" y="305" fill="#1485EE" font-family="system-ui,-apple-system,sans-serif" font-size="12" font-weight="500">▸ Mi Wireless All-in-One Inkjet</text>
-      <text x="66" y="322" fill="#888" font-family="system-ui,-apple-system,sans-serif" font-size="11">192.168.0.35  —  AirPrint ready</text>
-      <text x="54" y="342" fill="#AAA" font-family="system-ui,-apple-system,sans-serif" font-size="9">12:05</text>
-    </g>
-
-    <!-- ============================================ -->
-    <!-- Message 5: Bot installed -->
-    <!-- ============================================ -->
-    <g opacity="0">
-      <animate attributeName="opacity" from="0" to="1" begin="11s" dur="0.4s" fill="freeze"/>
-      <animateTransform attributeName="transform" type="translate" from="0 8" to="0 0" begin="11s" dur="0.4s" fill="freeze"/>
-      <circle cx="28" cy="355" r="15" fill="#1485EE"/>
-      <text x="28" y="361" fill="#FFF" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="700" text-anchor="middle">D</text>
-      <rect x="52" y="355" width="210" height="48" rx="6" fill="#FFF" filter="url(#bubbleShadow)"/>
-      <rect x="52" y="355" width="4" height="48" rx="2" fill="#07C160"/>
-      <text x="68" y="375" fill="#333" font-family="system-ui,-apple-system,sans-serif" font-size="12.5">Installing driver… ✓</text>
-      <text x="68" y="394" fill="#333" font-family="system-ui,-apple-system,sans-serif" font-size="12.5">Printer ready!</text>
-      <text x="54" y="416" fill="#AAA" font-family="system-ui,-apple-system,sans-serif" font-size="9">12:05</text>
-    </g>
-
-    <!-- ============================================ -->
-    <!-- Message 6: User print order -->
-    <!-- ============================================ -->
-    <g opacity="0">
-      <animate attributeName="opacity" from="0" to="1" begin="14s" dur="0.4s" fill="freeze"/>
-      <animateTransform attributeName="transform" type="translate" from="0 8" to="0 0" begin="14s" dur="0.4s" fill="freeze"/>
-      <rect x="236" y="430" width="188" height="48" rx="6" fill="#95EC69" filter="url(#bubbleShadow)"/>
-      <text x="248" y="450" fill="#1A1A1A" font-family="system-ui,-apple-system,sans-serif" font-size="12.5">Print aaa.jpg from</text>
-      <text x="248" y="469" fill="#1A1A1A" font-family="system-ui,-apple-system,sans-serif" font-size="12.5">my desktop</text>
-      <text x="424" y="490" fill="#AAA" font-family="system-ui,-apple-system,sans-serif" font-size="9" text-anchor="end">12:06</text>
-    </g>
-
-    <!-- Typing indicator 2 -->
-    <g opacity="0">
-      <animate attributeName="opacity" from="0" to="1" begin="15.5s" dur="0.3s" fill="freeze"/>
-      <animate attributeName="opacity" from="1" to="0" begin="17s" dur="0.3s" fill="freeze"/>
-      <rect x="52" y="505" width="52" height="26" rx="6" fill="#FFF" filter="url(#bubbleShadow)"/>
-      <circle cx="67" cy="518" r="2.5" fill="#CCC">
-        <animate attributeName="opacity" values="0.3;1;0.3" dur="1s" repeatCount="indefinite"/>
-      </circle>
-      <circle cx="78" cy="518" r="2.5" fill="#CCC">
-        <animate attributeName="opacity" values="0.3;1;0.3" dur="1s" begin="0.25s" repeatCount="indefinite"/>
-      </circle>
-      <circle cx="89" cy="518" r="2.5" fill="#CCC">
-        <animate attributeName="opacity" values="0.3;1;0.3" dur="1s" begin="0.5s" repeatCount="indefinite"/>
-      </circle>
-    </g>
-
-    <!-- ============================================ -->
-    <!-- Message 7: Bot print done -->
-    <!-- ============================================ -->
-    <g opacity="0">
-      <animate attributeName="opacity" from="0" to="1" begin="17.5s" dur="0.4s" fill="freeze"/>
-      <animateTransform attributeName="transform" type="translate" from="0 8" to="0 0" begin="17.5s" dur="0.4s" fill="freeze"/>
-      <circle cx="28" cy="505" r="15" fill="#1485EE"/>
-      <text x="28" y="511" fill="#FFF" font-family="system-ui,-apple-system,sans-serif" font-size="13" font-weight="700" text-anchor="middle">D</text>
-      <rect x="52" y="505" width="230" height="48" rx="6" fill="#FFF" filter="url(#bubbleShadow)"/>
-      <rect x="52" y="505" width="4" height="48" rx="2" fill="#07C160"/>
-      <text x="68" y="525" fill="#333" font-family="system-ui,-apple-system,sans-serif" font-size="12.5">Sent to printer ✓</text>
-      <text x="68" y="544" fill="#888" font-family="system-ui,-apple-system,sans-serif" font-size="11">Job ID xiaomi-printer-43</text>
-      <text x="54" y="566" fill="#AAA" font-family="system-ui,-apple-system,sans-serif" font-size="9">12:06</text>
-    </g>
-
-    <!-- ============================================ -->
-    <!-- Printer status card -->
-    <!-- ============================================ -->
-    <g opacity="0">
-      <animate attributeName="opacity" from="0" to="1" begin="20s" dur="0.5s" fill="freeze"/>
-      <rect x="52" y="580" width="340" height="38" rx="6" fill="#F5F5F5" filter="url(#bubbleShadow)"/>
-      <text x="80" y="604" fill="#555" font-family="system-ui,-apple-system,sans-serif" font-size="12">Xiaomi Printer</text>
-      <!-- printing animation dot -->
-      <circle cx="260" cy="600" r="4" fill="#07C160">
-        <animate attributeName="r" values="4;7;4" dur="1.5s" repeatCount="indefinite"/>
-        <animate attributeName="opacity" values="0.8;0.2;0.8" dur="1.5s" repeatCount="indefinite"/>
-      </circle>
-      <text x="275" y="604" fill="#07C160" font-family="system-ui,-apple-system,sans-serif" font-size="11.5" font-weight="500">Printing…</text>
-    </g>
+    <text x="166" y="546" fill="#888" font-family="SF Mono,Menlo,Monaco,Courier New,monospace" font-size="12">Printing...</text>
   </g>
 </svg>
