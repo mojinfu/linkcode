@@ -1,7 +1,8 @@
 BINARY  := bin/linkcode
-PIDFILE := $(BINARY)/../.linkcode.pid
 CONFIG  := configs/linkcode.yaml
 LOG     := /tmp/linkcode.log
+
+PIDFILE := bin/.linkcode.pid
 
 .PHONY: build run stop restart status clean
 
@@ -11,12 +12,12 @@ build:
 run: stop build
 	@if [ -f $(PIDFILE) ]; then \
 		echo "ERROR: linkcode appears to be running (pid $$(cat $(PIDFILE)))."; \
-		echo "  Run 'make stop' first or remove $(PIDFILE) manually."; \
+		echo "  Run 'make stop' first."; \
 		exit 1; \
 	fi
 	nohup $(BINARY) -config $(CONFIG) > $(LOG) 2>&1 &
 	sleep 2
-	cat $(PIDFILE) 2>/dev/null && echo "Started. Log: $(LOG)" || echo "WARNING: PID file not found, check $(LOG)"
+	@cat $(PIDFILE) 2>/dev/null && echo "Started. Log: $(LOG)" || echo "WARNING: may not have started, check $(LOG)"
 
 stop:
 	@if [ -f $(PIDFILE) ]; then \
@@ -27,12 +28,12 @@ stop:
 			while kill -0 $$PID 2>/dev/null; do sleep 0.5; done; \
 			echo "Stopped."; \
 		else \
-			echo "Stale PID file ($$PID not running), cleaning up."; \
 			rm -f $(PIDFILE); \
 		fi; \
-	else \
-		echo "No PID file, not running."; \
 	fi
+	@# Fallback: kill any leftover linkcode processes without PID files.
+	@pkill -f "$(BINARY)" 2>/dev/null && echo "Cleaned up leftover processes." || true
+	@rm -f $(PIDFILE)
 
 restart: stop build
 	nohup $(BINARY) -config $(CONFIG) > $(LOG) 2>&1 &
