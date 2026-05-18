@@ -149,12 +149,16 @@ func fromRecord(r *store.SessionRecord) *Session {
 	if r.BoundBotID.Valid {
 		botID = r.BoundBotID.Int64
 	}
+	claudeSID := ""
+	if r.ClaudeSessionID.Valid {
+		claudeSID = r.ClaudeSessionID.String
+	}
 	return &Session{
 		ID:              r.ID,
 		Name:            r.Name,
 		AgentType:       r.AgentType,
 		ProcessStatus:   r.ProcessStatus,
-		ClaudeSessionID: r.ClaudeSessionID,
+		ClaudeSessionID: claudeSID,
 		BoundBotID:      botID,
 		CreatedAt:       r.CreatedAt,
 		LastActiveAt:    r.LastActiveAt,

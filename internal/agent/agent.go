@@ -6,8 +6,29 @@ import "context"
 
 // OutputChunk represents a piece of streaming output from an agent.
 type OutputChunk struct {
-	Content string
-	Kind    OutputKind
+	Content  string
+	Kind     OutputKind
+	Question *Question // non-nil when Kind == KindQuestion
+}
+
+// Question represents a structured AskUserQuestion extracted from a tool_use.
+type Question struct {
+	ToolUseID string         `json:"toolUseId"`
+	Questions []QuestionItem `json:"questions"`
+}
+
+// QuestionItem is a single question within an AskUserQuestion tool_use.
+type QuestionItem struct {
+	Question    string           `json:"question"`
+	Header      string           `json:"header"`
+	Options     []QuestionOption `json:"options"`
+	MultiSelect bool             `json:"multiSelect"`
+}
+
+// QuestionOption is one selectable option in a question.
+type QuestionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
 }
 
 // OutputKind categorizes the type of agent output.
@@ -19,6 +40,7 @@ const (
 	KindToolUse  OutputKind = "tool_use"
 	KindFinal    OutputKind = "final"
 	KindError    OutputKind = "error"
+	KindQuestion OutputKind = "question"
 )
 
 // Runner manages the lifecycle of agent sessions.
@@ -55,4 +77,6 @@ type Session interface {
 
 	// ClaudeSessionID returns the Claude-side session identifier (UUID), if any.
 	ClaudeSessionID() string
+
+
 }

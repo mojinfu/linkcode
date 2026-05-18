@@ -127,3 +127,4 @@ func (s *Session) IsAlive() bool {
 func (s *Session) ClaudeSessionID() string {
 	return s.process.SessionID()
 }
+

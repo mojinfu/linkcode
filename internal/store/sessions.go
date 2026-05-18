@@ -19,7 +19,7 @@ type SessionRecord struct {
 	Name            string
 	AgentType       string
 	ProcessStatus   ProcessStatus
-	ClaudeSessionID string
+	ClaudeSessionID sql.NullString
 	BoundBotID      sql.NullInt64
 	CreatedAt       time.Time
 	LastActiveAt    time.Time
