@@ -3,7 +3,7 @@
 </div>
 
 <div align="center">
-  <img src="assets/title.svg" alt="LinkCode" width="640">
+  <img src="assets/title.svg" alt="LinkCode" width="720">
 </div>
 
 <div align="center">
