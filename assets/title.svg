@@ -1,26 +1,37 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 90" width="560" height="90">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 100" width="600" height="100">
   <defs>
-    <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#1A1A1A"/>
-      <stop offset="100%" stop-color="#333"/>
+    <linearGradient id="tg" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#07C160"/>
+      <stop offset="100%" stop-color="#1485EE"/>
     </linearGradient>
   </defs>
+
   <!-- L -->
-  <text x="0" y="72" fill="url(#titleGrad)" font-family="Menlo,Monaco,Courier New,monospace" font-size="56" font-weight="900">L</text>
+  <rect x="10" y="16" width="11" height="68" rx="2" fill="#07C160"/>
+  <rect x="10" y="70" width="50" height="14" rx="2" fill="#07C160"/>
+
   <!-- I -->
-  <text x="40" y="72" fill="url(#titleGrad)" font-family="Menlo,Monaco,Courier New,monospace" font-size="56" font-weight="900">I</text>
+  <rect x="66" y="16" width="11" height="68" rx="2" fill="#18BA52"/>
+
   <!-- N -->
-  <text x="72" y="72" fill="url(#titleGrad)" font-family="Menlo,Monaco,Courier New,monospace" font-size="56" font-weight="900">N</text>
+  <path d="M84 84 L84 16 L96 16 L130 60 L130 16 L142 16 L142 84 L130 84 L96 38 L96 84 Z" fill="#209FD0"/>
+
   <!-- K -->
-  <text x="122" y="72" fill="url(#titleGrad)" font-family="Menlo,Monaco,Courier New,monospace" font-size="56" font-weight="900">K</text>
+  <path d="M150 84 L150 16 L162 16 L162 44 L192 16 L208 16 L176 50 L210 84 L194 84 L164 54 L162 58 L162 84 Z" fill="#1E90D8"/>
+
   <!-- C -->
-  <text x="175" y="72" fill="#1485EE" font-family="Menlo,Monaco,Courier New,monospace" font-size="56" font-weight="900">C</text>
+  <path d="M272 84 L218 84 Q190 84 190 50 Q190 16 218 16 L272 16" fill="none" stroke="#1976D2" stroke-width="14" stroke-linecap="round"/>
+
   <!-- O -->
-  <text x="222" y="72" fill="#1485EE" font-family="Menlo,Monaco,Courier New,monospace" font-size="56" font-weight="900">O</text>
+  <circle cx="320" cy="50" r="34" fill="none" stroke="#1565C0" stroke-width="14"/>
+
   <!-- D -->
-  <text x="272" y="72" fill="#1485EE" font-family="Menlo,Monaco,Courier New,monospace" font-size="56" font-weight="900">D</text>
+  <rect x="374" y="16" width="11" height="68" rx="2" fill="#0D47A1"/>
+  <path d="M385 23 L410 23 Q430 23 430 50 Q430 77 410 77 L385 77" fill="none" stroke="#0D47A1" stroke-width="12" stroke-linecap="round"/>
+
   <!-- E -->
-  <text x="322" y="72" fill="#1485EE" font-family="Menlo,Monaco,Courier New,monospace" font-size="56" font-weight="900">E</text>
-  <!-- Subtle underline accent -->
-  <rect x="168" y="78" width="188" height="3" rx="1.5" fill="#1485EE" opacity="0.4"/>
+  <rect x="448" y="16" width="11" height="68" rx="2" fill="#1485EE"/>
+  <rect x="459" y="16" width="52" height="12" rx="2" fill="#1485EE"/>
+  <rect x="459" y="44" width="40" height="12" rx="2" fill="#1485EE"/>
+  <rect x="459" y="72" width="52" height="12" rx="2" fill="#1485EE"/>
 </svg>
