@@ -3,15 +3,10 @@
 </div>
 
 <div align="center">
+  <img src="assets/title.svg" alt="LinkCode" width="480">
+</div>
 
-```
-    ██╗     ██╗███╗   ██╗██╗  ██╗ ██████╗ ██████╗ ██████╗ ███████╗
-    ██║     ██║████╗  ██║██║ ██╔╝██╔════╝██╔═══██╗██╔══██╗██╔════╝
-    ██║     ██║██╔██╗ ██║█████╔╝ ██║     ██║   ██║██║  ██║█████╗
-    ██║     ██║██║╚██╗██║██╔═██╗ ██║     ██║   ██║██║  ██║██╔══╝
-    ███████╗██║██║ ╚████║██║  ██╗╚██████╗╚██████╔╝██████╔╝███████╗
-    ╚══════╝╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝
-```
+<div align="center">
 
 [![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=for-the-badge&logo=go&logoColor=white)]()
 [![WeCom](https://img.shields.io/badge/WeCom-Work_WX-07C160?style=for-the-badge&logo=wechat&logoColor=white)]()
