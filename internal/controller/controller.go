@@ -226,13 +226,21 @@ func (c *Controller) handleList(userID string) string {
 		return fmt.Sprintf("查询失败：%v", err)
 	}
 
-	if len(sessions) == 0 {
+	// Filter: only show sessions with a valid bot binding.
+	var valid []session.Session
+	for _, s := range sessions {
+		if s.BoundBotID > 0 {
+			valid = append(valid, s)
+		}
+	}
+
+	if len(valid) == 0 {
 		return "当前没有活跃的 Agent。发送 /start 创建一个吧！"
 	}
 
 	var sb strings.Builder
 	sb.WriteString("你的活跃 Agent：\n")
-	for i, s := range sessions {
+	for i, s := range valid {
 		status := "运行中"
 		if s.ProcessStatus == "sleeped" {
 			status = "休眠"

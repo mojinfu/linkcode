@@ -10,8 +10,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os/exec"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,13 +51,14 @@ func Start(ctx context.Context, claudePath, workDir, sessionID string) (*Process
 		sessionID = newUUID()
 		args = append(args, "--session-id", sessionID)
 	}
-	args = append(args, "--output-format", "stream-json", "--verbose")
+	args = append(args, "--output-format", "stream-json", "--input-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions")
 
 	cmd := exec.CommandContext(ctx, claudePath, args...)
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
 
+	log.Printf("[procman] starting: %s %s", claudePath, strings.Join(args, " "))
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
@@ -74,12 +77,12 @@ func Start(ctx context.Context, claudePath, workDir, sessionID string) (*Process
 	}
 
 	p := &Process{
-		cmd:       cmd,
-		stdin:     stdin,
-		output:    make(chan agent.OutputChunk, 256),
-		cancel:    cancel,
-		alive:     true,
-		sessionID: sessionID,
+		cmd:         cmd,
+		stdin:       stdin,
+		output:      make(chan agent.OutputChunk, 256),
+		cancel:      cancel,
+		alive:       true,
+		sessionID:   sessionID,
 	}
 
 	go p.readOutput(stdout)
@@ -239,9 +242,12 @@ type claudeStreamMsg struct {
 }
 
 type claudeStreamContent struct {
-	Type     string `json:"type"`
-	Text     string `json:"text"`
-	Thinking string `json:"thinking"`
+	Type     string          `json:"type"`
+	Text     string          `json:"text"`
+	Thinking string          `json:"thinking"`
+	ID       string          `json:"id"`
+	Name     string          `json:"name"`
+	Input    json.RawMessage `json:"input"`
 }
 
 // extractSessionID parses the session_id from a claude init message.
@@ -274,6 +280,26 @@ func stripANSI(s string) string {
 	return ansiRE.ReplaceAllString(s, "")
 }
 
+// askUserQuestionInput mirrors the JSON shape of an AskUserQuestion tool_use input.
+type askUserQuestionInput struct {
+	Questions []agent.QuestionItem `json:"questions"`
+}
+
+// parseQuestion extracts a structured Question from an AskUserQuestion tool_use.
+func parseQuestion(toolUseID string, raw json.RawMessage) *agent.Question {
+	var in askUserQuestionInput
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return nil
+	}
+	if len(in.Questions) == 0 {
+		return nil
+	}
+	return &agent.Question{
+		ToolUseID: toolUseID,
+		Questions: in.Questions,
+	}
+}
+
 func parseOutputLine(line []byte) agent.OutputChunk {
 	var raw claudeStreamJSON
 	if err := json.Unmarshal(line, &raw); err != nil {
@@ -292,6 +318,11 @@ func parseOutputLine(line []byte) agent.OutputChunk {
 			case "text":
 				return agent.OutputChunk{Kind: agent.KindText, Content: stripANSI(c.Text)}
 			case "tool_use":
+				if c.Name == "AskUserQuestion" {
+					if q := parseQuestion(c.ID, c.Input); q != nil {
+						return agent.OutputChunk{Kind: agent.KindQuestion, Question: q}
+					}
+				}
 				return agent.OutputChunk{Kind: agent.KindToolUse, Content: stripANSI(c.Text)}
 			default:
 				return agent.OutputChunk{Kind: agent.KindThinking}

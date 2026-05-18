@@ -255,7 +255,9 @@ func TestStart_SendAndReceive(t *testing.T) {
 		t.Fatal("SessionID() returned empty")
 	}
 
-	outputCh, err := proc.Send(ctx, "Say exactly: hello world")
+	// Build a stream-json user message (now required by --input-format stream-json).
+	inputJSON := `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Say exactly: hello world"}]}}`
+	outputCh, err := proc.Send(ctx, inputJSON)
 	if err != nil {
 		t.Fatalf("Send() failed: %v", err)
 	}
@@ -272,5 +274,65 @@ func TestStart_SendAndReceive(t *testing.T) {
 
 	if !gotText {
 		t.Error("did not get expected 'hello world' response from agent")
+	}
+}
+
+func TestParseQuestion(t *testing.T) {
+	// Simulate an AskUserQuestion tool_use input JSON.
+	input := json.RawMessage(`{"questions":[{"question":"Which color?","header":"Color","options":[{"label":"Red","description":"Warm color"},{"label":"Blue","description":"Cool color"}],"multiSelect":false}]}`)
+	q := parseQuestion("call_00_test123", input)
+	if q == nil {
+		t.Fatal("parseQuestion returned nil")
+	}
+	if q.ToolUseID != "call_00_test123" {
+		t.Errorf("ToolUseID = %q, want call_00_test123", q.ToolUseID)
+	}
+	if len(q.Questions) != 1 {
+		t.Fatalf("len(Questions) = %d, want 1", len(q.Questions))
+	}
+	if q.Questions[0].Header != "Color" {
+		t.Errorf("Header = %q, want Color", q.Questions[0].Header)
+	}
+	if len(q.Questions[0].Options) != 2 {
+		t.Errorf("len(Options) = %d, want 2", len(q.Questions[0].Options))
+	}
+}
+
+func TestParseQuestion_InvalidInput(t *testing.T) {
+	if q := parseQuestion("id", json.RawMessage(`not json`)); q != nil {
+		t.Error("expected nil for invalid JSON")
+	}
+	if q := parseQuestion("id", json.RawMessage(`{"other":"field"}`)); q != nil {
+		t.Error("expected nil for non-question JSON")
+	}
+}
+
+func TestParseOutputLine_KindQuestion(t *testing.T) {
+	// Build a stream-json line with an AskUserQuestion tool_use.
+	input := json.RawMessage(`{"questions":[{"question":"Pick one","header":"Choice","options":[{"label":"A","description":""}],"multiSelect":false}]}`)
+	inputJSON, _ := json.Marshal(input)
+	line := `{"type":"assistant","message":{"id":"abc","type":"message","role":"assistant","content":[{"type":"tool_use","id":"call_00_q1","name":"AskUserQuestion","input":` + string(inputJSON) + `}]}}`
+
+	chunk := parseOutputLine([]byte(line))
+	if chunk.Kind != "question" {
+		t.Fatalf("expected KindQuestion, got %s", chunk.Kind)
+	}
+	if chunk.Question == nil {
+		t.Fatal("Question is nil")
+	}
+	if chunk.Question.ToolUseID != "call_00_q1" {
+		t.Errorf("ToolUseID = %q", chunk.Question.ToolUseID)
+	}
+}
+
+func TestParseOutputLine_NonAskUserQuestion_ToolUse(t *testing.T) {
+	// A Write tool_use should still be KindToolUse, not KindQuestion.
+	input := json.RawMessage(`{"file_path":"/tmp/test.txt","content":"hello"}`)
+	inputJSON, _ := json.Marshal(input)
+	line := `{"type":"assistant","message":{"id":"abc","type":"message","role":"assistant","content":[{"type":"tool_use","id":"call_00_w1","name":"Write","input":` + string(inputJSON) + `}]}}`
+
+	chunk := parseOutputLine([]byte(line))
+	if chunk.Kind != "tool_use" {
+		t.Fatalf("expected KindToolUse, got %s", chunk.Kind)
 	}
 }

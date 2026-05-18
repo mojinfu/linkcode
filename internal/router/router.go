@@ -4,12 +4,16 @@ package router
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"linkcode/internal/agent"
+	"linkcode/internal/botpool"
 	"linkcode/internal/channel"
 	"linkcode/internal/gateway"
 	"linkcode/internal/session"
@@ -18,16 +22,22 @@ import (
 // Router forwards messages between users and agent processes.
 type Router struct {
 	sessionMgr  *session.Manager
+	botPool     *botpool.Pool
 	agentRunner agent.Runner
 	gw          *gateway.Gateway
+
+	mu              sync.Mutex
+	pendingQuestions map[int64]*agent.Question // sessionID -> pending question
 }
 
 // New creates a new Router.
-func New(sessMgr *session.Manager, runner agent.Runner, gw *gateway.Gateway) *Router {
+func New(sessMgr *session.Manager, pool *botpool.Pool, runner agent.Runner, gw *gateway.Gateway) *Router {
 	return &Router{
-		sessionMgr:  sessMgr,
-		agentRunner: runner,
-		gw:          gw,
+		sessionMgr:       sessMgr,
+		botPool:          pool,
+		agentRunner:      runner,
+		gw:               gw,
+		pendingQuestions: make(map[int64]*agent.Question),
 	}
 }
 
@@ -37,10 +47,9 @@ func (r *Router) HandleWorkerEvent(msg channel.Message) {
 		return
 	}
 
-	// Look up the session for this bot and send welcome.
 	sess, err := r.sessionMgr.GetByPlatformBotID(msg.BotID)
 	if err != nil || sess == nil {
-		return // Bot not bound yet
+		return
 	}
 
 	ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
@@ -52,13 +61,82 @@ func (r *Router) HandleWorkerEvent(msg channel.Message) {
 	})
 }
 
+// streamJSONUserMsg builds a stream-json user message line.
+type streamJSONUserMsg struct {
+	Type    string              `json:"type"`
+	Message streamJSONMsgBody   `json:"message"`
+}
+
+type streamJSONMsgBody struct {
+	Role    string                 `json:"role"`
+	Content []streamJSONContentPart `json:"content"`
+}
+
+type streamJSONContentPart struct {
+	Type       string `json:"type"`
+	Text       string `json:"text,omitempty"`
+	ToolUseID  string `json:"tool_use_id,omitempty"`
+	Content    string `json:"content,omitempty"`
+}
+
+// buildTextInput formats a plain text message as a stream-json line.
+func buildTextInput(text string) string {
+	msg := streamJSONUserMsg{
+		Type: "user",
+		Message: streamJSONMsgBody{
+			Role: "user",
+			Content: []streamJSONContentPart{
+				{Type: "text", Text: text},
+			},
+		},
+	}
+	b, _ := json.Marshal(msg)
+	return string(b)
+}
+
+// formatAnswerText converts a user's raw answer into a descriptive text for Claude.
+// It parses numeric answers and maps them to option labels when possible.
+func formatAnswerText(q *agent.Question, rawAnswer string) string {
+	answer := strings.TrimSpace(rawAnswer)
+
+	var sb strings.Builder
+	sb.WriteString("[用户回答]\n")
+
+	for i, qi := range q.Questions {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(fmt.Sprintf("问题: %s\n", qi.Question))
+		resolved := resolveAnswer(qi, answer)
+		sb.WriteString(fmt.Sprintf("回答: %s", resolved))
+	}
+
+	return sb.String()
+}
+
+// resolveAnswer maps a user input to an option label.
+// If the input is a number, it maps to the corresponding option.
+// If it's comma-separated numbers (multi-select), it maps each one.
+// Otherwise returns the input as-is.
+func resolveAnswer(qi agent.QuestionItem, input string) string {
+	parts := strings.Split(input, ",")
+	var labels []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if n, err := strconv.Atoi(p); err == nil && n >= 1 && n <= len(qi.Options) {
+			labels = append(labels, qi.Options[n-1].Label)
+		} else {
+			labels = append(labels, p)
+		}
+	}
+	return strings.Join(labels, ", ")
+}
+
 // HandleWorkerMessage processes a message from a user to a worker bot.
-// It looks up the session, routes to the agent process, and streams replies back.
 func (r *Router) HandleWorkerMessage(msg channel.Message) {
 	log.Printf("[router] msg from %s: %s", msg.UserID, msg.Content)
 	ctx := context.Background()
 
-	// Find the session bound to this bot by platform bot_id.
 	sess, err := r.sessionMgr.GetByPlatformBotID(msg.BotID)
 	if err != nil {
 		log.Printf("[router] session not found for bot %s: %v", msg.BotID, err)
@@ -66,55 +144,59 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 		return
 	}
 
-	// Process /end as a special command to end the session.
 	if msg.Content == "/end" {
-		r.sendReply(msg, "会话已结束。Session 记录已保留。")
+		r.gw.CloseWorkerChannel(sess.BoundBotID)
+		if sess.BoundBotID > 0 {
+			if err := r.botPool.Release(sess.BoundBotID); err != nil {
+				log.Printf("[router] release bot %d: %v", sess.BoundBotID, err)
+			}
+		}
+		if err := r.sessionMgr.MarkSleeped(sess.ID); err != nil {
+			log.Printf("[router] mark sleeped %d: %v", sess.ID, err)
+		}
+		r.sendReply(msg, "会话已结束。Session 记录已保留，Bot 已归还池中。")
 		return
 	}
 
-	// Save user message to history, including quote context if present.
+	// Save user message to history.
 	contentToSave := msg.Content
 	if msg.QuoteContent != "" {
 		contentToSave = fmt.Sprintf("[引用: %s] %s", msg.QuoteContent, msg.Content)
 	}
 	_ = r.sessionMgr.AddMessage(sess.ID, "user", contentToSave, string(msg.MsgType))
 
-	// Resume or start agent process.
-	var agentSess agent.Session
-	shouldResume := sess.ClaudeSessionID != ""
-	if shouldResume {
-		agentSess, err = r.agentRunner.Resume(ctx, fmt.Sprintf("%d", sess.ID), sess.ClaudeSessionID)
-		if err != nil {
-			log.Printf("[router] resume agent: %v", err)
-			r.sendReply(msg, "唤醒 Agent 失败，请重试。")
-			return
-		}
-		_ = r.sessionMgr.MarkWaked(sess.ID)
+	// Check for a pending question — if one exists, format the answer as text.
+	r.mu.Lock()
+	pendingQ := r.pendingQuestions[sess.ID]
+	delete(r.pendingQuestions, sess.ID)
+	r.mu.Unlock()
+
+	var inputJSON string
+	if pendingQ != nil {
+		answerText := formatAnswerText(pendingQ, msg.Content)
+		log.Printf("[router] answering pending question %s with: %s", pendingQ.ToolUseID, answerText)
+		inputJSON = buildTextInput(answerText)
 	} else {
-		agentSess, err = r.agentRunner.Start(ctx, fmt.Sprintf("%d", sess.ID))
-		if err != nil {
-			log.Printf("[router] start agent: %v", err)
-			r.sendReply(msg, "启动 Agent 失败，请重试。")
-			return
+		input := msg.Content
+		if msg.QuoteContent != "" {
+			input = fmt.Sprintf("[用户引用了以下消息]\n%s\n\n[用户的新消息]\n%s", msg.QuoteContent, msg.Content)
 		}
-		// Save the Claude session ID for future resumes.
-		if sid := agentSess.ClaudeSessionID(); sid != "" {
-			if err := r.sessionMgr.SetClaudeSessionID(sess.ID, sid); err != nil {
-				log.Printf("[router] WARNING: failed to persist claude session ID for session %d: %v", sess.ID, err)
-			}
-		}
+		inputJSON = buildTextInput(input)
+	}
+
+	// Resume or start agent process.
+	agentSess, err := r.getOrCreateAgentSession(ctx, sess)
+	if err != nil {
+		log.Printf("[router] agent session: %v", err)
+		r.sendReply(msg, "启动/唤醒 Agent 失败，请重试。")
+		return
 	}
 
 	_ = r.sessionMgr.Touch(sess.ID)
 
-	// Build input, including quote context if the user quoted a previous message.
-	input := msg.Content
-	if msg.QuoteContent != "" {
-		input = fmt.Sprintf("[用户引用了以下消息]\n%s\n\n[用户的新消息]\n%s", msg.QuoteContent, msg.Content)
-	}
 
 	// Send input to agent and stream output back.
-	outputCh, err := agentSess.Send(ctx, input)
+	outputCh, err := agentSess.Send(ctx, inputJSON)
 	if err != nil {
 		log.Printf("[router] send to agent: %v", err)
 		r.sendReply(msg, "Agent 处理失败，请重试。")
@@ -124,6 +206,7 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 	streamID := fmt.Sprintf("stream_%d", time.Now().UnixNano())
 	var builder strings.Builder
 	var fullResponse string
+	var question *agent.Question
 
 	for chunk := range outputCh {
 		switch chunk.Kind {
@@ -133,20 +216,28 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 			return
 		case agent.KindText:
 			builder.WriteString(chunk.Content)
-			// Send accumulated full content with Finish:false for progressive display.
 			r.sendStreamReply(msg, builder.String(), streamID, false)
+		case agent.KindQuestion:
+			question = chunk.Question
 		case agent.KindFinal:
 			fullResponse = chunk.Content
 		case agent.KindThinking, agent.KindToolUse:
-			// Accumulate but don't stream to user.
 		}
 	}
 
-	// Send final frame with accumulated full content.
+	// Send final text frame.
 	if builder.Len() > 0 {
 		r.sendStreamReply(msg, builder.String(), streamID, true)
 	} else {
 		r.sendStreamReply(msg, fullResponse, streamID, true)
+	}
+
+	// If Claude asked a question, store it and send formatted menu to IM.
+	if question != nil {
+		r.mu.Lock()
+		r.pendingQuestions[sess.ID] = question
+		r.mu.Unlock()
+		r.sendQuestionMenu(msg, question)
 	}
 
 	// Save agent response to history.
@@ -156,6 +247,66 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 	}
 	if responseText != "" {
 		_ = r.sessionMgr.AddMessage(sess.ID, "agent", responseText, "text")
+	}
+}
+
+// getOrCreateAgentSession resumes or starts an agent session for the given LinkCode session.
+func (r *Router) getOrCreateAgentSession(ctx context.Context, sess *session.Session) (agent.Session, error) {
+	if sess.ClaudeSessionID != "" {
+		agentSess, err := r.agentRunner.Resume(ctx, fmt.Sprintf("%d", sess.ID), sess.ClaudeSessionID)
+		if err != nil {
+			return nil, err
+		}
+		_ = r.sessionMgr.MarkWaked(sess.ID)
+		return agentSess, nil
+	}
+
+	agentSess, err := r.agentRunner.Start(ctx, fmt.Sprintf("%d", sess.ID))
+	if err != nil {
+		return nil, err
+	}
+	if sid := agentSess.ClaudeSessionID(); sid != "" {
+		if err := r.sessionMgr.SetClaudeSessionID(sess.ID, sid); err != nil {
+			log.Printf("[router] WARNING: failed to persist claude session ID for session %d: %v", sess.ID, err)
+		}
+	}
+	return agentSess, nil
+}
+
+// sendQuestionMenu formats a structured question as an IM menu and sends it.
+func (r *Router) sendQuestionMenu(msg channel.Message, q *agent.Question) {
+	ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
+	if !ok {
+		return
+	}
+
+	for i, qi := range q.Questions {
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("📋 %s\n\n", qi.Question))
+		for j, opt := range qi.Options {
+			sb.WriteString(fmt.Sprintf("%d. %s", j+1, opt.Label))
+			if opt.Description != "" {
+				sb.WriteString(fmt.Sprintf(" - %s", opt.Description))
+			}
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n回复数字选择")
+		if qi.MultiSelect {
+			sb.WriteString("（可多选，用逗号分隔）")
+		}
+		sb.WriteString("，或引用此消息回复。")
+
+		ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
+			Text:          sb.String(),
+			ReplyToID:     msg.ID,
+			OriginalReqID: msg.ReqID,
+			ChatID:        msg.ChatID,
+		})
+
+		// For multiple questions, save each one with a modified ToolUseID.
+		if len(q.Questions) > 1 && i > 0 {
+			_ = i // TODO: multi-question support
+		}
 	}
 }
 
