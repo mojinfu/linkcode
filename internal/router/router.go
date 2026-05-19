@@ -204,7 +204,11 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 			done := ch.PrepareClose()
 			boundBotID := sess.BoundBotID
 			go func() {
-				<-done
+				select {
+				case <-done:
+				case <-time.After(10 * time.Second):
+					log.Printf("[router] prepareClose timeout for bot %d, closing anyway", boundBotID)
+				}
 				r.gw.CloseWorkerChannel(boundBotID)
 			}()
 		}
