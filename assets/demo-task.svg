@@ -1,0 +1,153 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 588" width="440" height="588">
+  <defs>
+    <clipPath id="phoneClip">
+      <rect x="0" y="0" width="440" height="588" rx="20"/>
+    </clipPath>
+  </defs>
+
+  <!-- Phone frame -->
+  <g clip-path="url(#phoneClip)">
+    <!-- Background -->
+    <rect x="0" y="0" width="440" height="588" fill="#0D0D0D"/>
+
+    <!-- Top bar -->
+    <rect x="0" y="0" width="440" height="46" fill="#151515"/>
+    <rect x="0" y="46" width="440" height="0.5" fill="#2A2A2A"/>
+    <!-- Signal bars -->
+    <g transform="translate(16, 17)">
+      <rect x="0" y="9" width="3" height="3" rx="0.5" fill="#777"/>
+      <rect x="4.5" y="6" width="3" height="6" rx="0.5" fill="#777"/>
+      <rect x="9" y="3" width="3" height="9" rx="0.5" fill="#777"/>
+      <rect x="13.5" y="0" width="3" height="12" rx="0.5" fill="#777"/>
+    </g>
+    <text x="220" y="31" fill="#999" font-family="system-ui,-apple-system,sans-serif" font-size="14" font-weight="600" text-anchor="middle" letter-spacing="0.5">DevHelper</text>
+    <!-- Battery icon -->
+    <g transform="translate(396, 18)">
+      <rect x="0" y="0" width="20" height="10" rx="2" fill="none" stroke="#777" stroke-width="1"/>
+      <rect x="20" y="3" width="2" height="4" rx="1" fill="#777"/>
+      <rect x="2" y="2" width="14" height="6" rx="1" fill="#777"/>
+    </g>
+
+    <!-- ============================================ -->
+    <!-- Message 1: DevHelper greeting (left) -->
+    <!-- ============================================ -->
+    <g opacity="0">
+      <animate attributeName="opacity" from="0" to="1" begin="0.5s" dur="0.35s" fill="freeze"/>
+      <animateTransform attributeName="transform" type="translate" from="0 6" to="0 0" begin="0.5s" dur="0.35s" fill="freeze"/>
+      <rect x="16" y="60" width="290" height="56" rx="10" fill="#1A1A1A"/>
+      <text x="28" y="80" fill="#AAA" font-family="system-ui,-apple-system,sans-serif" font-size="10" font-weight="600">[DevHelper]</text>
+      <text x="28" y="98" fill="#DDD" font-family="system-ui,-apple-system,sans-serif" font-size="12.5">Hi! I'm your Claude Code agent.</text>
+      <text x="28" y="126" fill="#555" font-family="system-ui,-apple-system,sans-serif" font-size="9">12:03</text>
+    </g>
+
+    <!-- ============================================ -->
+    <!-- Message 2: User task (right) -->
+    <!-- ============================================ -->
+    <g opacity="0">
+      <animate attributeName="opacity" from="0" to="1" begin="2.5s" dur="0.35s" fill="freeze"/>
+      <animateTransform attributeName="transform" type="translate" from="0 6" to="0 0" begin="2.5s" dur="0.35s" fill="freeze"/>
+      <rect x="132" y="132" width="292" height="48" rx="10" fill="#222"/>
+      <text x="424" y="152" fill="#CCC" font-family="system-ui,-apple-system,sans-serif" font-size="12.5" text-anchor="end">Find a Xiaomi printer on my</text>
+      <text x="424" y="170" fill="#CCC" font-family="system-ui,-apple-system,sans-serif" font-size="12.5" text-anchor="end">LAN and set it up</text>
+      <text x="416" y="192" fill="#555" font-family="system-ui,-apple-system,sans-serif" font-size="9" text-anchor="end">12:05</text>
+    </g>
+
+    <!-- ============================================ -->
+    <!-- Typing indicator (brief) -->
+    <!-- ============================================ -->
+    <g opacity="0">
+      <animate attributeName="opacity" from="0" to="1" begin="4s" dur="0.2s" fill="freeze"/>
+      <animate attributeName="opacity" from="1" to="0" begin="5.5s" dur="0.2s" fill="freeze"/>
+      <rect x="16" y="200" width="56" height="28" rx="10" fill="#1A1A1A"/>
+      <circle cx="32" cy="214" r="2.5" fill="#555">
+        <animate attributeName="opacity" values="0.3;1;0.3" dur="1s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="42" cy="214" r="2.5" fill="#555">
+        <animate attributeName="opacity" values="0.3;1;0.3" dur="1s" begin="0.2s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="52" cy="214" r="2.5" fill="#555">
+        <animate attributeName="opacity" values="0.3;1;0.3" dur="1s" begin="0.4s" repeatCount="indefinite"/>
+      </circle>
+    </g>
+
+    <!-- ============================================ -->
+    <!-- Message 3: DevHelper scanning (left) -->
+    <!-- ============================================ -->
+    <g opacity="0">
+      <animate attributeName="opacity" from="0" to="1" begin="6s" dur="0.35s" fill="freeze"/>
+      <animateTransform attributeName="transform" type="translate" from="0 6" to="0 0" begin="6s" dur="0.35s" fill="freeze"/>
+      <rect x="16" y="200" width="238" height="52" rx="10" fill="#1A1A1A"/>
+      <text x="28" y="220" fill="#AAA" font-family="system-ui,-apple-system,sans-serif" font-size="10" font-weight="600">[DevHelper]</text>
+      <text x="28" y="238" fill="#DDD" font-family="system-ui,-apple-system,sans-serif" font-size="12.5">Scanning local network...</text>
+      <text x="28" y="262" fill="#555" font-family="system-ui,-apple-system,sans-serif" font-size="9">12:05</text>
+    </g>
+
+    <!-- ============================================ -->
+    <!-- Message 4: DevHelper found printer (left) -->
+    <!-- ============================================ -->
+    <g opacity="0">
+      <animate attributeName="opacity" from="0" to="1" begin="8s" dur="0.35s" fill="freeze"/>
+      <animateTransform attributeName="transform" type="translate" from="0 6" to="0 0" begin="8s" dur="0.35s" fill="freeze"/>
+      <rect x="16" y="270" width="290" height="72" rx="10" fill="#1A1A1A"/>
+      <text x="28" y="290" fill="#AAA" font-family="system-ui,-apple-system,sans-serif" font-size="10" font-weight="600">[DevHelper]</text>
+      <text x="28" y="308" fill="#DDD" font-family="system-ui,-apple-system,sans-serif" font-size="12.5">Found 1 device:</text>
+      <text x="28" y="326" fill="#CCC" font-family="system-ui,-apple-system,sans-serif" font-size="11.5">▸ Mi Wireless All-in-One</text>
+      <text x="28" y="342" fill="#888" font-family="system-ui,-apple-system,sans-serif" font-size="10.5">192.168.0.35 -- AirPrint ready</text>
+      <text x="28" y="358" fill="#555" font-family="system-ui,-apple-system,sans-serif" font-size="9">12:05</text>
+    </g>
+
+    <!-- ============================================ -->
+    <!-- Message 5: DevHelper installed (left) -->
+    <!-- ============================================ -->
+    <g opacity="0">
+      <animate attributeName="opacity" from="0" to="1" begin="11s" dur="0.35s" fill="freeze"/>
+      <animateTransform attributeName="transform" type="translate" from="0 6" to="0 0" begin="11s" dur="0.35s" fill="freeze"/>
+      <rect x="16" y="360" width="230" height="52" rx="10" fill="#1A1A1A"/>
+      <text x="28" y="380" fill="#AAA" font-family="system-ui,-apple-system,sans-serif" font-size="10" font-weight="600">[DevHelper]</text>
+      <text x="28" y="398" fill="#DDD" font-family="system-ui,-apple-system,sans-serif" font-size="12.5">Installing driver... ✓</text>
+      <text x="28" y="422" fill="#555" font-family="system-ui,-apple-system,sans-serif" font-size="9">12:05</text>
+    </g>
+
+    <!-- ============================================ -->
+    <!-- Message 6: User print order (right) -->
+    <!-- ============================================ -->
+    <g opacity="0">
+      <animate attributeName="opacity" from="0" to="1" begin="14s" dur="0.35s" fill="freeze"/>
+      <animateTransform attributeName="transform" type="translate" from="0 6" to="0 0" begin="14s" dur="0.35s" fill="freeze"/>
+      <rect x="204" y="430" width="220" height="48" rx="10" fill="#222"/>
+      <text x="208" y="450" fill="#CCC" font-family="system-ui,-apple-system,sans-serif" font-size="12.5">Print aaa.jpg from</text>
+      <text x="208" y="468" fill="#CCC" font-family="system-ui,-apple-system,sans-serif" font-size="12.5">my desktop</text>
+      <text x="416" y="490" fill="#555" font-family="system-ui,-apple-system,sans-serif" font-size="9" text-anchor="end">12:06</text>
+    </g>
+
+    <!-- ============================================ -->
+    <!-- Typing indicator 2 -->
+    <!-- ============================================ -->
+    <g opacity="0">
+      <animate attributeName="opacity" from="0" to="1" begin="15.5s" dur="0.2s" fill="freeze"/>
+      <animate attributeName="opacity" from="1" to="0" begin="17s" dur="0.2s" fill="freeze"/>
+      <rect x="16" y="498" width="56" height="28" rx="10" fill="#1A1A1A"/>
+      <circle cx="32" cy="512" r="2.5" fill="#555">
+        <animate attributeName="opacity" values="0.3;1;0.3" dur="1s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="42" cy="512" r="2.5" fill="#555">
+        <animate attributeName="opacity" values="0.3;1;0.3" dur="1s" begin="0.2s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="52" cy="512" r="2.5" fill="#555">
+        <animate attributeName="opacity" values="0.3;1;0.3" dur="1s" begin="0.4s" repeatCount="indefinite"/>
+      </circle>
+    </g>
+
+    <!-- ============================================ -->
+    <!-- Message 7: DevHelper print done (left) -->
+    <!-- ============================================ -->
+    <g opacity="0">
+      <animate attributeName="opacity" from="0" to="1" begin="17.5s" dur="0.35s" fill="freeze"/>
+      <animateTransform attributeName="transform" type="translate" from="0 6" to="0 0" begin="17.5s" dur="0.35s" fill="freeze"/>
+      <rect x="16" y="498" width="248" height="70" rx="10" fill="#1A1A1A"/>
+      <text x="28" y="518" fill="#AAA" font-family="system-ui,-apple-system,sans-serif" font-size="10" font-weight="600">[DevHelper]</text>
+      <text x="28" y="536" fill="#DDD" font-family="system-ui,-apple-system,sans-serif" font-size="12.5">Sent to printer ✓</text>
+      <text x="28" y="558" fill="#555" font-family="system-ui,-apple-system,sans-serif" font-size="9">12:06</text>
+    </g>
+  </g>
+</svg>

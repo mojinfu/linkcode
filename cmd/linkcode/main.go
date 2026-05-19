@@ -7,11 +7,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"linkcode/configs"
@@ -28,9 +30,60 @@ import (
 	"linkcode/internal/store"
 )
 
+const pidFile = "bin/.linkcode.pid"
+
+// acquirePidFile checks for an existing linkcode process via a PID file.
+// If a running process is found, it returns an error to prevent duplicate startup.
+// If the PID file is stale (process no longer exists), it is cleaned up.
+func acquirePidFile() error {
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil // no existing PID file, safe to start
+		}
+		return fmt.Errorf("read pid file: %w", err)
+	}
+
+	pid, err := strconv.Atoi(string(data))
+	if err != nil {
+		// Corrupted PID file, remove and continue.
+		_ = os.Remove(pidFile)
+		return nil
+	}
+
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		// PID not valid on this platform, remove stale file.
+		_ = os.Remove(pidFile)
+		return nil
+	}
+
+	// Signal 0 checks if we can send a signal to the process (i.e., it exists).
+	if err := proc.Signal(syscall.Signal(0)); err == nil {
+		return fmt.Errorf("linkcode is already running (pid %d).\n  Stop it first with: kill %d\n  Or remove the pid file: rm %s", pid, pid, pidFile)
+	}
+
+	// Process not running, clean up stale PID file.
+	_ = os.Remove(pidFile)
+	return nil
+}
+
+func writePidFile() error {
+	return os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0644)
+}
+
+func releasePidFile() {
+	_ = os.Remove(pidFile)
+}
+
 func main() {
 	configPath := flag.String("config", "configs/linkcode.yaml", "Path to YAML configuration file")
 	flag.Parse()
+
+	// Prevent duplicate instances.
+	if err := acquirePidFile(); err != nil {
+		log.Fatalf("startup: %v", err)
+	}
 
 	// Load configuration.
 	cfg, err := configs.Load(*configPath)
@@ -83,8 +136,9 @@ func main() {
 	gw := gateway.New(ctrlChan)
 
 	// Initialize controller and router.
+	statusMgr := router.NewStatusManager(gw, sessionMgr)
 	ctrl := controller.New(sessionMgr, botPool, agentRunner, gw)
-	rtr := router.New(sessionMgr, botPool, agentRunner, gw)
+	rtr := router.New(sessionMgr, botPool, agentRunner, gw, statusMgr)
 
 	// Wire worker bot handlers globally via gateway.
 	gw.SetWorkerMessageHandler(func(msg channel.Message) {
@@ -93,6 +147,7 @@ func main() {
 	gw.SetWorkerEventHandler(func(msg channel.Message) {
 		rtr.HandleWorkerEvent(msg)
 	})
+	gw.SetConnectionChangeHandler(statusMgr.HandleConnectionChange)
 
 	// Wire control bot message handling.
 	ctrlChan.OnMessage(func(msg channel.Message) {
@@ -146,6 +201,12 @@ func main() {
 		}()
 	}
 
+	if err := writePidFile(); err != nil {
+		log.Printf("WARNING: could not write pid file: %v", err)
+	} else {
+		log.Printf("pid %d written to %s", os.Getpid(), pidFile)
+	}
+
 	log.Println("LinkCode is running. Press Ctrl+C to stop.")
 
 	// Wait for shutdown signal.
@@ -155,5 +216,6 @@ func main() {
 
 	log.Println("shutting down...")
 	gw.CloseAll()
+	releasePidFile()
 	fmt.Println("LinkCode stopped.")
 }

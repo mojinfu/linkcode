@@ -74,4 +74,8 @@ type Channel interface {
 
 	// IsConnected returns whether the connection is currently active.
 	IsConnected() bool
+
+	// OnConnectionChange registers a callback that fires when the WebSocket
+	// connects (after initial auth or reconnection) or disconnects.
+	OnConnectionChange(handler func(connected bool))
 }

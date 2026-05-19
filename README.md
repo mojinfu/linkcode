@@ -3,18 +3,13 @@
 </div>
 
 <div align="center">
+  <img src="assets/title.svg" alt="LinkCode" width="720">
+</div>
 
-```
-    ██╗     ██╗███╗   ██╗██╗  ██╗ ██████╗ ██████╗ ██████╗ ███████╗
-    ██║     ██║████╗  ██║██║ ██╔╝██╔════╝██╔═══██╗██╔══██╗██╔════╝
-    ██║     ██║██╔██╗ ██║█████╔╝ ██║     ██║   ██║██║  ██║█████╗
-    ██║     ██║██║╚██╗██║██╔═██╗ ██║     ██║   ██║██║  ██║██╔══╝
-    ███████╗██║██║ ╚████║██║  ██╗╚██████╗╚██████╔╝██████╔╝███████╗
-    ╚══════╝╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝
-```
+<div align="center">
 
 [![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=for-the-badge&logo=go&logoColor=white)]()
-[![WeCom](https://img.shields.io/badge/WeCom-企业微信-07C160?style=for-the-badge&logo=wechat&logoColor=white)]()
+[![WeCom](https://img.shields.io/badge/WeCom-Work_WX-07C160?style=for-the-badge&logo=wechat&logoColor=white)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)]()
 
 </div>
@@ -22,132 +17,112 @@
 <br>
 
 <div align="center">
-  <em>在 IM 里说句话，专属 Bot 主动来找你，背后就是你的 AI Agent。</em>
-  <br>
-  <em>Say a word in IM. A dedicated bot reaches out. An AI agent runs behind it.</em>
+  <em>Say a word in IM. A dedicated bot reaches out. An AI agent runs behind it — on your machine.</em>
 </div>
 
 <br>
 
 ---
 
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                                                                              │
-│   $ ./linkcode -config configs/linkcode.yaml                                 │
-│   [INFO] MySQL connected                                                     │
-│   [INFO] control bot connected to WeCom                                      │
-│   [INFO] LinkCode is running.                                                │
-│                                                                              │
-│   # 用户在企业微信发 /start                                                    │
-│   [CTRL] reply: "欢迎使用 LinkCode！请选择操作..."                             │
-│                                                                              │
-│   # 用户选 1 → 创建新 Agent → 命名 "代码助手"                                  │
-│   [POOL] allocate bot Bot_2 → session_042                                    │
-│   [PROC] spawn Claude Code (pid=28471)                                       │
-│   [GATE] connect Bot_2 to wss://openws.work.weixin.qq.com                    │
-│                                                                              │
-│   # Bot "代码助手" 主动发来消息:                                               │
-│   "你好，我是你的 Claude Code「代码助手」"                                      │
-│                                                                              │
-│   # 用户和 Bot 对话                                                           │
-│   [ROUTE] session_042 ← "分析 /var/log/error.log"                             │
-│   [PROC] Claude Code → streaming response →                                  │
-│   [ROUTE] Bot → user: (实时流式输出)                                           │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
+## 🎬 Control: One Command, One Bot
+
+<div align="center">
+  <img src="assets/demo-control.svg" alt="LinkCode control flow">
+</div>
+
+<br>
+
+## 🎬 Execute: Your Bot Takes Action
+
+<div align="center">
+  <img src="assets/demo-task.svg" alt="LinkCode task execution">
+</div>
 
 ---
 
-## ⚡ 开始使用
+## Why LinkCode?
+
+| Pain Point | LinkCode |
+|---|---|
+| **Chained to your desk** — CI fails during dinner? Can't fix it from your phone. | **IM is your remote control.** Trigger builds, check logs, deploy from anywhere. No SSH, no VPN. |
+| **General-purpose bots lose context** — one bot juggling everything, conversations overlap. | **One bot, one task, one session.** Dedicated bots with full context per task. Switch tasks by switching chats. |
+| **Cloud relays are slow** — IM-to-AI bridges bounce through cloud APIs, adding seconds of latency. | **Runs locally, sub-second response.** Agent processes live on your machine. No cloud hop. |
+| **Chatbots only *talk*. They don't *do*.** — ChatGPT tells you *how*. It won't open the file or run the command. | **Your agent operates your computer.** It reads files, runs commands, manages processes — then reports back. |
+| **Your code leaves your machine** — cloud AI uploads your context to someone else's infrastructure. | **Everything stays local.** Agent runs as a child process on your own hardware. Nothing leaks. |
+
+---
+
+## Quick Start
 
 ```bash
-# 交互式安装 (自动检测依赖)
+# Interactive installer (auto-detects dependencies)
 bash scripts/install.sh
 
-# 编辑配置
+# Edit config
 vim configs/linkcode.yaml
 
-# 启动
+# Run
 ./bin/linkcode -config configs/linkcode.yaml
 ```
 
-然后打开企业微信，给总控 Bot 发 `/start`。
+Then open WeCom, send `/start` to your control bot. Done.
 
 ---
 
-## 🗺️ Roadmap
+## Roadmap
 
-| IM 平台 | 状态 | Agent 工具 | 状态 |
-|---------|:----:|-----------|:----:|
-| 企业微信 | ✅ | Claude Code | ✅ |
-| Telegram | 🔲 | Kimi Code | 🔲 |
-| Teams | 🔲 | | |
+**IM Platforms**
 
-> 扩展只需实现 `channel.Channel` 或 `agent.Runner` 接口，其余模块零改动。
+| Platform | Status |
+|----------|:------:|
+| WeCom (企业微信) | Done |
+| Telegram | Planned |
+| Teams | Planned |
 
----
+> Adding a platform = implementing `channel.Channel`.
 
-## 💬 交互方式
+**Agent Tools**
 
-### 总控 Bot：拨号菜单
+| Agent | Status |
+|-------|:------:|
+| Claude Code | Done |
+| Kimi Code | Planned |
 
-给总控 Bot 发送 `/start` 进入菜单，回复数字选择操作：
-
-```
-欢迎使用 LinkCode！请选择操作：
-1. 创建新 Agent
-2. 查看我的 Agent 列表
-3. 添加新 Bot
-4. 查看 Bot 池状态
-5. 结束 Agent
-
-请回复数字 1-5
-💡 引用本条消息后回复数字，选择更准确
-```
-
-**推荐做法**：长按总控 Bot 的菜单消息 →「引用」→ 回复数字。引用消歧 100% 准确，不依赖对话顺序。
-
-### Worker Bot：自由对话 + 可选引用
-
-与 Worker Bot（Claude Code）自由对话。引用 Worker Bot 的消息回复时，引用内容会作为上下文传递给 Claude：
-
-```
-[用户引用了以下消息]
-Claude 之前的回复内容
-[用户的新消息]
-用户的新消息内容
-```
-
-Sessions are persisted via `--resume`. Reply to a dormant bot and it wakes up with full context.
+> Adding an agent = implementing `agent.Runner`. Everything else stays.
 
 ---
 
-## 📂 项目结构
+## How It Works
+
+### Control Bot — menu-driven
+
+Send `/start` to the control bot and reply with numbers:
 
 ```
-linkcode/
-├── cmd/
-│   ├── linkcode/        # 主程序入口
-│   └── devmsg/          # 开发用消息发送工具
-├── internal/
-│   ├── gateway/         # 企微 WebSocket 连接管理
-│   ├── controller/      # 总控 Bot 菜单状态机
-│   ├── botpool/         # Bot 池（录入/分配/回收）
-│   ├── session/         # Session CRUD + 绑定关系
-│   ├── router/          # 消息双向路由（引用上下文传递）
-│   ├── procman/         # Claude Code 子进程管理
-│   ├── agent/claude/    # Claude Code Runner
-│   ├── channel/wecom/   # 企微 WebSocket 实现（含引用解析）
-│   ├── store/           # MySQL 数据层
-│   ├── crypto/          # AES 加密
-│   └── admin/           # Web 管理面板
-├── scripts/
-│   └── install.sh       # 一键安装脚本
-├── migrations/          # SQL DDL
-└── configs/             # 配置模板
+Welcome to LinkCode! Choose:
+1. New Agent
+2. My Agents
+3. Add Bot
+4. End Agent
+
+Reply with number 1–4
+💡 Quote this message before replying for reliable routing
 ```
+
+**Tip**: long-press the control bot's menu → "Quote" → reply with a number. Accuracy guaranteed.
+
+### Worker Bot — free conversation
+
+Each worker bot is a Claude Code session. Talk naturally. Quote-reply a bot message to pass that context back to Claude:
+
+```
+[Quoted message]
+Claude's previous output
+[New message]
+Your follow-up
+```
+
+Sessions persist via `--resume`. Reply to a dormant bot and it wakes up with full context.
 
 ---
 
