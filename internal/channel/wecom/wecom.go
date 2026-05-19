@@ -54,6 +54,8 @@ type Channel struct {
 	msgHandler   channel.MessageHandler
 	eventHandler channel.EventHandler
 
+	connChangeHandler func(connected bool)
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -93,6 +95,11 @@ func (c *Channel) OnMessage(handler channel.MessageHandler) {
 // OnEvent registers a handler for platform events.
 func (c *Channel) OnEvent(handler channel.EventHandler) {
 	c.eventHandler = handler
+}
+
+// OnConnectionChange registers a callback for WebSocket connection state changes.
+func (c *Channel) OnConnectionChange(handler func(connected bool)) {
+	c.connChangeHandler = handler
 }
 
 // Connect establishes a WebSocket connection and authenticates.
@@ -196,18 +203,22 @@ func (c *Channel) sendProactive(userID string, content channel.MessageContent) e
 	}
 
 	reqID := c.nextReqID()
+
+	// aibot_send_msg only supports markdown/rich_text, not stream.
+	body := []byte(mustMarshal(wecomSendMsg{
+		ChatID:  chatID,
+		MsgType: "markdown",
+		Markdown: wecomMarkdown{
+			Content: content.Text,
+		},
+	}))
+
 	resp := wecomEnvelope{
-		Cmd: "aibot_send_msg",
+		Cmd:     "aibot_send_msg",
 		Headers: wecomHeaders{
 			ReqID: reqID,
 		},
-		Body: json.RawMessage(mustMarshal(wecomSendMsg{
-			ChatID:  chatID,
-			MsgType: "markdown",
-			Markdown: wecomMarkdown{
-				Content: content.Text,
-			},
-		})),
+		Body: json.RawMessage(body),
 	}
 
 	// Register ack waiter before sending.
@@ -319,6 +330,11 @@ func (c *Channel) connect() error {
 
 	c.conn = conn
 	c.connected = true
+
+	if c.connChangeHandler != nil {
+		go c.connChangeHandler(true)
+	}
+
 	return nil
 }
 
@@ -364,7 +380,12 @@ func (c *Channel) markBrokenLocked() {
 		c.conn.Close()
 		c.conn = nil
 	}
+	wasConnected := c.connected
 	c.connected = false
+	// Notify outside the lock to avoid reentrancy issues.
+	if wasConnected && c.connChangeHandler != nil {
+		go c.connChangeHandler(false)
+	}
 }
 
 func (c *Channel) readLoop() {
@@ -685,6 +706,7 @@ type wecomSendMsg struct {
 	ChatID   string        `json:"chatid"`
 	MsgType  string        `json:"msgtype"`
 	Markdown wecomMarkdown `json:"markdown,omitempty"`
+	Stream   *wecomStream  `json:"stream,omitempty"`
 }
 
 type wecomMarkdown struct {

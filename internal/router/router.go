@@ -25,18 +25,20 @@ type Router struct {
 	botPool     *botpool.Pool
 	agentRunner agent.Runner
 	gw          *gateway.Gateway
+	statusMgr   *StatusManager
 
 	mu              sync.Mutex
 	pendingQuestions map[int64]*agent.Question // sessionID -> pending question
 }
 
 // New creates a new Router.
-func New(sessMgr *session.Manager, pool *botpool.Pool, runner agent.Runner, gw *gateway.Gateway) *Router {
+func New(sessMgr *session.Manager, pool *botpool.Pool, runner agent.Runner, gw *gateway.Gateway, statusMgr *StatusManager) *Router {
 	return &Router{
 		sessionMgr:       sessMgr,
 		botPool:          pool,
 		agentRunner:      runner,
 		gw:               gw,
+		statusMgr:        statusMgr,
 		pendingQuestions: make(map[int64]*agent.Question),
 	}
 }
@@ -144,7 +146,18 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 		return
 	}
 
+	// Bootstrap status session (no message sent — state stays internal until first change).
+	r.statusMgr.Send(StatusEvent{
+		SessionID:   sess.ID,
+		BotID:       msg.BotID,
+		UserID:      msg.UserID,
+		ChatID:      msg.ChatID,
+		SessionName: sess.Name,
+		State:       StateWaking,
+	})
+
 	if msg.Content == "/end" {
+		r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateSleeped})
 		r.gw.CloseWorkerChannel(sess.BoundBotID)
 		if sess.BoundBotID > 0 {
 			if err := r.botPool.Release(sess.BoundBotID); err != nil {
@@ -189,6 +202,7 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 	// wait for Claude to finish processing only to get a broken pipe.
 	ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
 	if !ok || !ch.IsConnected() {
+		r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateReconnecting})
 		r.sendReply(msg, "连接已断开，正在重连，请稍后重试。")
 		return
 	}
@@ -197,35 +211,41 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 	agentSess, err := r.getOrCreateAgentSession(ctx, sess)
 	if err != nil {
 		log.Printf("[router] agent session: %v", err)
+		r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateDizzy})
 		r.sendReply(msg, "启动/唤醒 Agent 失败，请重试。")
 		return
 	}
 
 	_ = r.sessionMgr.Touch(sess.ID)
 
-
 	// Send input to agent and stream output back.
 	outputCh, err := agentSess.Send(ctx, inputJSON)
 	if err != nil {
 		log.Printf("[router] send to agent: %v", err)
+		r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateDizzy})
 		r.sendReply(msg, "Agent 处理失败，请重试。")
 		return
 	}
 
 	streamID := fmt.Sprintf("stream_%d", time.Now().UnixNano())
+	thinkPrefix := fmt.Sprintf("[◐] %s thinking...\n\n", sess.Name)
+
+	// Send initial thinking frame so the user sees status in the reply stream.
+	r.sendStreamReply(msg, thinkPrefix, streamID, false)
+
 	var builder strings.Builder
 	var fullResponse string
 	var question *agent.Question
-
 	for chunk := range outputCh {
 		switch chunk.Kind {
 		case agent.KindError:
 			log.Printf("[router] agent error: %s", chunk.Content)
-			r.sendStreamReply(msg, chunk.Content, streamID, true)
+			r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateDizzy})
+			r.sendStreamReply(msg, fmt.Sprintf("[💫] %s error\n\n%s", sess.Name, chunk.Content), streamID, true)
 			return
 		case agent.KindText:
 			builder.WriteString(chunk.Content)
-			r.sendStreamReply(msg, builder.String(), streamID, false)
+			r.sendStreamReply(msg, thinkPrefix+builder.String(), streamID, false)
 		case agent.KindQuestion:
 			question = chunk.Question
 		case agent.KindFinal:
@@ -234,12 +254,13 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 		}
 	}
 
-	// Send final text frame.
-	if builder.Len() > 0 {
-		r.sendStreamReply(msg, builder.String(), streamID, true)
-	} else {
-		r.sendStreamReply(msg, fullResponse, streamID, true)
+	// Build final frame with "done" status prefix.
+	responseText := builder.String()
+	if responseText == "" {
+		responseText = fullResponse
 	}
+	doneText := fmt.Sprintf("[✓] %s stand by\n\n%s", sess.Name, responseText)
+	r.sendStreamReply(msg, doneText, streamID, true)
 
 	// If Claude asked a question, store it and send formatted menu to IM.
 	if question != nil {
@@ -250,10 +271,6 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 	}
 
 	// Save agent response to history.
-	responseText := builder.String()
-	if responseText == "" {
-		responseText = fullResponse
-	}
 	if responseText != "" {
 		_ = r.sessionMgr.AddMessage(sess.ID, "agent", responseText, "text")
 	}
@@ -324,13 +341,6 @@ func (r *Router) sendStreamReply(msg channel.Message, text string, streamID stri
 	if !ok {
 		log.Printf("[router] no channel for bot %s", msg.BotID)
 		return
-	}
-	// Append a rotating indicator so the user can see the model is still streaming.
-	// Each frame picks a different character, creating an animation effect.
-	// When streaming ends (finish=true), the indicator disappears.
-	if !finish {
-		spinner := []string{"◐", "◓", "◑", "◒"}
-		text += " " + spinner[time.Now().UnixMilli()/200%int64(len(spinner))]
 	}
 	if err := ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
 		Text:          text,

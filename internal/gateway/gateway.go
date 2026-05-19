@@ -17,8 +17,9 @@ import (
 type Gateway struct {
 	controlChan channel.Channel
 
-	workerMsgHandler   channel.MessageHandler
-	workerEventHandler channel.EventHandler
+	workerMsgHandler    channel.MessageHandler
+	workerEventHandler  channel.EventHandler
+	connChangeHandler   func(botInternalID int64, platformBotID string, connected bool)
 
 	mu         sync.Mutex
 	workerChans map[int64]*workerEntry // botInternalID -> channel
@@ -47,6 +48,12 @@ func (g *Gateway) SetWorkerEventHandler(h channel.EventHandler) {
 	g.workerEventHandler = h
 }
 
+// SetConnectionChangeHandler sets the callback invoked when any worker bot's
+// WebSocket connects or disconnects.
+func (g *Gateway) SetConnectionChangeHandler(h func(botInternalID int64, platformBotID string, connected bool)) {
+	g.connChangeHandler = h
+}
+
 // OpenWorkerChannel creates a WebSocket connection for a worker bot.
 // botInternalID is the database ID of the bot.
 // platformBotID and secret are the WeCom credentials.
@@ -59,16 +66,23 @@ func (g *Gateway) OpenWorkerChannel(ctx context.Context, botInternalID int64, pl
 	}
 
 	ch := wecom.New(platformBotID, secret)
-	if err := ch.Connect(ctx); err != nil {
-		return fmt.Errorf("gateway: open worker channel for bot %d (%s): %w", botInternalID, platformBotID, err)
-	}
 
-	// Attach the shared worker message and event handlers.
+	// Register handlers BEFORE connecting — the readLoop and connection-change
+	// callback both fire during Connect.
 	if g.workerMsgHandler != nil {
 		ch.OnMessage(g.workerMsgHandler)
 	}
 	if g.workerEventHandler != nil {
 		ch.OnEvent(g.workerEventHandler)
+	}
+	if g.connChangeHandler != nil {
+		ch.OnConnectionChange(func(connected bool) {
+			g.connChangeHandler(botInternalID, platformBotID, connected)
+		})
+	}
+
+	if err := ch.Connect(ctx); err != nil {
+		return fmt.Errorf("gateway: open worker channel for bot %d (%s): %w", botInternalID, platformBotID, err)
 	}
 
 	g.workerChans[botInternalID] = &workerEntry{
