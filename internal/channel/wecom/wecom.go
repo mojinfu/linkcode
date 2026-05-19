@@ -117,6 +117,17 @@ func (c *Channel) Connect(ctx context.Context) error {
 	return nil
 }
 
+// PrepareClose signals the channel to stop accepting new messages.
+// It cancels the context (stopping heartbeat and readLoop) and returns a
+// channel that closes when readLoop has exited. After the channel closes,
+// the caller should call Close() to tear down the WebSocket.
+func (c *Channel) PrepareClose() <-chan struct{} {
+	if c.cancel != nil {
+		c.cancel()
+	}
+	return c.done
+}
+
 // Close gracefully closes the WebSocket connection.
 func (c *Channel) Close() error {
 	if c.cancel != nil {
@@ -390,6 +401,9 @@ func (c *Channel) markBrokenLocked() {
 
 func (c *Channel) readLoop() {
 	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[wecom] bot %s: readLoop panic recovered: %v", c.botID, r)
+		}
 		select {
 		case <-c.done:
 			// Already closed.
@@ -465,6 +479,11 @@ func (c *Channel) reconnect(attempt int) bool {
 }
 
 func (c *Channel) handleMessage(raw []byte) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[wecom] bot %s: handleMessage panic recovered: %v", c.botID, r)
+		}
+	}()
 	log.Printf("[wecom] bot %s: recv %d bytes, raw: %s", c.botID, len(raw), string(raw))
 
 	var env wecomEnvelope
