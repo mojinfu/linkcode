@@ -165,6 +165,14 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 		return
 	}
 
+	// Voice messages are not transcribed by WeCom — content is always empty.
+	// Reject early, before any state change or Claude launch, to avoid
+	// triggering stream bubbles or status updates for an unsupported type.
+	if msg.MsgType == "voice" {
+		r.sendReply(msg, "语音消息暂不支持，请发送文字消息。")
+		return
+	}
+
 	// Bootstrap status session (no message sent — state stays internal until first change).
 	r.statusMgr.Send(StatusEvent{
 		SessionID:   sess.ID,
@@ -216,13 +224,6 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 				r.gw.CloseWorkerChannel(boundBotID)
 			}()
 		}
-		return
-	}
-
-	// Voice messages are not transcribed by WeCom — content is always empty.
-	// Reply directly instead of launching Claude with empty input.
-	if msg.MsgType == "voice" {
-		r.sendReply(msg, "语音消息暂不支持，请发送文字消息。")
 		return
 	}
 
