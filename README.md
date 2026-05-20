@@ -52,22 +52,24 @@
 
 ---
 
-## LinkCode vs. Clawdbot / LinkCode 与 Clawdbot 的对比
+## LinkCode vs. Clawdbot
 
-> Shared goal: control Claude Code from IM to write code remotely.
-> 共同目标：在 IM 中遥控 Claude Code 写代码。
+Both let you control Claude Code from IM. The difference is how directly they do it.
 
 |  | LinkCode | Clawdbot |
 |---|---|---|
-| **Language / 语言** | Go — single static binary | Node.js — npm + Docker |
-| **Prompt purity / Prompt 纯净度** | No extra system prompts | Injects system-level prompts |
-| **Token efficiency / Token 效率** | Zero overhead | Extra overhead per message |
-| **Deploy / 部署** | One binary | Node.js runtime + npm install |
-| **Management / 管理** | CLI + YAML config | Web admin panel |
-| **Attack surface / 攻击面** | Minimal | Larger (web panel, plugins, npm deps) |
+| **Prompt purity** | Passes messages through as-is. Claude behaves exactly like terminal use. | Injects system-level prompts that alter Claude's behavior. |
+| **Token efficiency** | Zero overhead — every token is your conversation. | System prompts and meta-instructions consume tokens on every message. |
+| **Response speed** | Sub-second — direct local process communication via Go channels. | Proxy gateway adds relay latency; browser control operations can hit 20s timeouts. |
+| **Security** | No web panel, no plugin marketplace, no npm dependency chain. | Web admin panel, plugin marketplace, npm supply chain. |
+| **Controllability** | Identical to native Claude Code — no prompt conflicts, no degraded reasoning. | Prompt layering can cause model behavior drift or degraded reasoning. |
+| **Permission model** | Your local filesystem permissions. No extra credentials needed. | Requires browser/web account credentials for certain features. |
+| **Multi-bot** | Multi-bot by design — each bot gets an independent WebSocket connection. | Primarily single-platform with extensions for additional channels. |
+| **Session isolation** | One bot = one session. Full context isolation. Switch tasks by switching chats. | Sessions managed internally; isolation depends on configuration. |
+| **Session persistence** | Sessions persist via `--resume`. Dormant bots wake up with full context. | Session state tied to Node.js process lifecycle. |
 
-**Pick LinkCode** if you want minimal, transparent, zero-overhead —— 极简、透明、零浪费。
-**Pick Clawdbot** if you want an admin panel and rich plugins —— 图形化管理、插件丰富。
+**Pick LinkCode** if you want minimal, transparent, zero-overhead control of Claude Code from IM.
+**Pick Clawdbot** if you prefer a web admin panel and plugin ecosystem.
 
 ---
 
