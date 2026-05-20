@@ -219,6 +219,13 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 		return
 	}
 
+	// Voice messages are not transcribed by WeCom — content is always empty.
+	// Reply directly instead of launching Claude with empty input.
+	if msg.MsgType == "voice" {
+		r.sendReply(msg, "语音消息暂不支持，请发送文字消息。")
+		return
+	}
+
 	// Save user message to history.
 	contentToSave := msg.Content
 	if msg.QuoteContent != "" {
