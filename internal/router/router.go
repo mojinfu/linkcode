@@ -196,9 +196,12 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 		}
 
 		// Signal prepare-to-close: cancel the context to stop heartbeat and
-		// signal readLoop to exit. Wait for readLoop to finish (done closes),
-		// then tear down the WebSocket. This avoids the race between writing
-		// the sleep frame and closing the connection inside readLoop.
+		// signal readLoop to exit. After readLoop has finished, give the
+		// WeCom server 2s to render the sleep stream bubble, then tear down
+		// the WebSocket. Without this delay, readLoop exits immediately when
+		// the message handler returns (since ctx is already cancelled),
+		// done closes within microseconds, and the server may close the
+		// connection before it finishes rendering the stream.
 		ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
 		if ok {
 			done := ch.PrepareClose()
@@ -209,6 +212,7 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 				case <-time.After(10 * time.Second):
 					log.Printf("[router] prepareClose timeout for bot %d, closing anyway", boundBotID)
 				}
+				time.Sleep(2 * time.Second)
 				r.gw.CloseWorkerChannel(boundBotID)
 			}()
 		}
