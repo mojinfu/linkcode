@@ -40,30 +40,18 @@
 
 ---
 
-## Why LinkCode?
-
-| Pain Point | LinkCode |
-|---|---|
-| **Chained to your desk** — CI fails during dinner? Can't fix it from your phone. | **IM is your remote control.** Trigger builds, check logs, deploy from anywhere. No SSH, no VPN. |
-| **General-purpose bots lose context** — one bot juggling everything, conversations overlap. | **One bot, one task, one session.** Dedicated bots with full context per task. Switch tasks by switching chats. |
-| **Cloud relays are slow** — IM-to-AI bridges bounce through cloud APIs, adding seconds of latency. | **Runs locally, sub-second response.** Agent processes live on your machine. No cloud hop. |
-| **Chatbots only *talk*. They don't *do*.** — ChatGPT tells you *how*. It won't open the file or run the command. | **Your agent operates your computer.** It reads files, runs commands, manages processes — then reports back. |
-| **Your code leaves your machine** — cloud AI uploads your context to someone else's infrastructure. | **Everything stays local.** Agent runs as a child process on your own hardware. Nothing leaks. |
-
----
-
 ## What LinkCode Is
 
-LinkCode is not a Claude alternative or competitor. It is an **IM message proxy and security gateway** for Claude Code.
+LinkCode 不是 Claude 的替代品或竞品，而是 **Claude Code 的 IM 消息代理与安全网关**。
 
 ```
 你的手机 IM  ──→  LinkCode  ──→  Claude Code（本地终端）  ──→  你的代码仓库
 ```
 
-- **Claude Code** is the engine — it analyzes, generates, and modifies code.
-- **LinkCode** is the remote control — it lets you drive Claude Code from WeCom, Lark, Discord, or any IM.
+- **Claude Code 是引擎** — 负责代码分析、生成与修改。
+- **LinkCode 是遥控器** — 让你通过企业微信、飞书、Discord 等 IM 远程操控 Claude Code。
 
-Code never leaves your machine. No extra prompts injected. No web panel exposed.
+代码从不出本地。不注入额外 Prompt。不暴露 Web 面板。
 
 ---
 
