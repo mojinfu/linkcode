@@ -42,16 +42,16 @@
 
 ## What LinkCode Is
 
-LinkCode 不是 Claude 的替代品或竞品，而是 **Claude Code 的 IM 消息代理与安全网关**。
+LinkCode is not a Claude alternative or competitor. It is an **IM message proxy and security gateway** for Claude Code.
 
 ```
-你的手机 IM  ──→  LinkCode  ──→  Claude Code（本地终端）  ──→  你的代码仓库
+Your phone IM  ──→  LinkCode  ──→  Claude Code (your terminal)  ──→  Your repo
 ```
 
-- **Claude Code 是引擎** — 负责代码分析、生成与修改。
-- **LinkCode 是遥控器** — 让你通过企业微信、飞书、Discord 等 IM 远程操控 Claude Code。
+- **Claude Code** is the engine — it analyzes, generates, and modifies code.
+- **LinkCode** is the remote control — it lets you drive Claude Code from WeCom, Lark, Discord, or any IM.
 
-代码从不出本地。不注入额外 Prompt。不暴露 Web 面板。
+Code never leaves your machine. No extra prompts injected. No web panel exposed.
 
 ---
 
