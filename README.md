@@ -40,15 +40,18 @@
 
 ---
 
-## Why LinkCode?
+## What LinkCode Is
 
-| Pain Point | LinkCode |
-|---|---|
-| **Chained to your desk** — CI fails during dinner? Can't fix it from your phone. | **IM is your remote control.** Trigger builds, check logs, deploy from anywhere. No SSH, no VPN. |
-| **General-purpose bots lose context** — one bot juggling everything, conversations overlap. | **One bot, one task, one session.** Dedicated bots with full context per task. Switch tasks by switching chats. |
-| **Cloud relays are slow** — IM-to-AI bridges bounce through cloud APIs, adding seconds of latency. | **Runs locally, sub-second response.** Agent processes live on your machine. No cloud hop. |
-| **Chatbots only *talk*. They don't *do*.** — ChatGPT tells you *how*. It won't open the file or run the command. | **Your agent operates your computer.** It reads files, runs commands, manages processes — then reports back. |
-| **Your code leaves your machine** — cloud AI uploads your context to someone else's infrastructure. | **Everything stays local.** Agent runs as a child process on your own hardware. Nothing leaks. |
+LinkCode is not a Claude alternative or competitor. It is an **IM message proxy and security gateway** for Claude Code.
+
+```
+Your phone IM  ──→  LinkCode  ──→  Claude Code (your terminal)  ──→  Your repo
+```
+
+- **Claude Code** is the engine — it analyzes, generates, and modifies code.
+- **LinkCode** is the remote control — it lets you drive Claude Code from WeCom, Lark, Discord, or any IM.
+
+Code never leaves your machine. No extra prompts injected. No web panel exposed.
 
 ---
 
