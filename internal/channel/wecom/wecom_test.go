@@ -433,3 +433,129 @@ func TestEndFlowMessageToCloseTiming(t *testing.T) {
 			"Production WeCom server may drop pending stream display.", elapsed)
 	}
 }
+
+// TestVoiceMessageParsing verifies that a voice message callback is correctly
+// parsed and dispatched through the message handler without panicking.
+func TestVoiceMessageParsing(t *testing.T) {
+	ch := New("voice-bot", "voice-secret")
+
+	receivedCh := make(chan channel.Message, 1)
+	ch.msgHandler = func(msg channel.Message) {
+		receivedCh <- msg
+	}
+
+	// Simulate a WeCom voice message callback with transcribed text.
+	voiceJSON := `{
+		"cmd": "aibot_msg_callback",
+		"headers": {"req_id": "voice-test-req-001"},
+		"body": {
+			"msgid": "msg-voice-001",
+			"aibotid": "voice-bot",
+			"chatid": "chat-voice-001",
+			"chattype": "single",
+			"from": {"userid": "user-voice-001"},
+			"msgtype": "voice",
+			"create_time": 1716200000,
+			"voice": {"content": "这是语音转文字的内容"}
+		}
+	}`
+
+	ch.handleMessage([]byte(voiceJSON))
+
+	select {
+	case msg := <-receivedCh:
+		if msg.MsgType != "voice" {
+			t.Errorf("expected MsgType 'voice', got '%s'", msg.MsgType)
+		}
+		if msg.Content != "这是语音转文字的内容" {
+			t.Errorf("expected Content '这是语音转文字的内容', got '%s'", msg.Content)
+		}
+		if msg.UserID != "user-voice-001" {
+			t.Errorf("expected UserID 'user-voice-001', got '%s'", msg.UserID)
+		}
+		if msg.ReqID != "voice-test-req-001" {
+			t.Errorf("expected ReqID 'voice-test-req-001', got '%s'", msg.ReqID)
+		}
+		if msg.ChatID != "chat-voice-001" {
+			t.Errorf("expected ChatID 'chat-voice-001', got '%s'", msg.ChatID)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("message handler was not called for voice message")
+	}
+}
+
+// TestVoiceMessageEmptyText verifies that a voice message without transcription
+// (empty text) does not panic.
+func TestVoiceMessageEmptyText(t *testing.T) {
+	ch := New("voice-empty-bot", "voice-empty-secret")
+
+	receivedCh := make(chan channel.Message, 1)
+	ch.msgHandler = func(msg channel.Message) {
+		receivedCh <- msg
+	}
+
+	// Voice message with no text (e.g., not yet transcribed by WeCom).
+	voiceJSON := `{
+		"cmd": "aibot_msg_callback",
+		"headers": {"req_id": "voice-empty-req"},
+		"body": {
+			"msgid": "msg-voice-empty",
+			"aibotid": "voice-empty-bot",
+			"chatid": "chat-empty",
+			"chattype": "single",
+			"from": {"userid": "user-empty"},
+			"msgtype": "voice",
+			"create_time": 1716200000,
+			"voice": {"content": ""}
+		}
+	}`
+
+	// Should not panic.
+	ch.handleMessage([]byte(voiceJSON))
+
+	select {
+	case msg := <-receivedCh:
+		if msg.Content != "" {
+			t.Logf("voice message has non-empty content: %s", msg.Content)
+		}
+		t.Log("empty voice message parsed without panic")
+	case <-time.After(1 * time.Second):
+		t.Fatal("message handler was not called for empty voice message")
+	}
+}
+
+// TestVoiceMessageMissingVoiceField verifies that a voice message without
+// the voice field (malformed) does not panic.
+func TestVoiceMessageMissingVoiceField(t *testing.T) {
+	ch := New("voice-missing-bot", "voice-missing-secret")
+
+	receivedCh := make(chan channel.Message, 1)
+	ch.msgHandler = func(msg channel.Message) {
+		receivedCh <- msg
+	}
+
+	// Voice msgtype but missing the voice field entirely.
+	voiceJSON := `{
+		"cmd": "aibot_msg_callback",
+		"headers": {"req_id": "voice-missing-req"},
+		"body": {
+			"msgid": "msg-voice-missing",
+			"aibotid": "voice-missing-bot",
+			"chatid": "chat-missing",
+			"chattype": "single",
+			"from": {"userid": "user-missing"},
+			"msgtype": "voice",
+			"create_time": 1716200000
+		}
+	}`
+
+	// Should not panic even with missing voice field.
+	ch.handleMessage([]byte(voiceJSON))
+
+	select {
+	case msg := <-receivedCh:
+		t.Logf("voice message with missing voice field parsed, content=%q", msg.Content)
+	case <-time.After(1 * time.Second):
+		t.Fatal("message handler was not called for voice message without voice field")
+	}
+}

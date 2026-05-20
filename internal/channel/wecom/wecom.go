@@ -543,7 +543,7 @@ func (c *Channel) handleMsgCallback(env wecomEnvelope) {
 	case "image":
 		msg.Content = "[图片]"
 	case "voice":
-		msg.Content = body.Voice.Text
+		msg.Content = body.Voice.Content
 	case "file":
 		msg.Content = "[文件]"
 	}
@@ -605,7 +605,7 @@ func extractQuoteContent(q *wecomQuote) string {
 		}
 		return strings.Join(parts, "")
 	case "voice":
-		return q.Voice.Text
+		return q.Voice.Content
 	default:
 		return "" // image/file have no text
 	}
@@ -679,7 +679,7 @@ type wecomImage struct {
 }
 
 type wecomVoice struct {
-	Text string `json:"text"`
+	Content string `json:"content"`
 }
 
 type wecomMixed struct {

@@ -21,7 +21,7 @@ import (
 
 const (
 	// spinnerFrames defines the 8-frame Braille spinner sequence.
-	spinnerFrames = "⣾⣽⣻⢿⡿⣟⣯⣷"
+	spinnerFrames = "⣷⣯⣟⡿⢿⣻⣽⣾"
 	// spinnerMinInterval is the fastest spin rate, used when tokens are flowing.
 	spinnerMinInterval = 200 * time.Millisecond
 	// spinnerMaxInterval is the slowest spin rate, used when idle.
