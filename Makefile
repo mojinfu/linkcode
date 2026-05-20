@@ -15,7 +15,7 @@ run: stop build
 		echo "  Run 'make stop' first."; \
 		exit 1; \
 	fi
-	nohup $(BINARY) -config $(CONFIG) > $(LOG) 2>&1 &
+	nohup $(BINARY) -config $(CONFIG) >> $(LOG) 2>&1 &
 	sleep 2
 	@cat $(PIDFILE) 2>/dev/null && echo "Started. Log: $(LOG)" || echo "WARNING: may not have started, check $(LOG)"
 
@@ -36,7 +36,7 @@ stop:
 	@rm -f $(PIDFILE)
 
 restart: stop build
-	nohup $(BINARY) -config $(CONFIG) > $(LOG) 2>&1 &
+	nohup $(BINARY) -config $(CONFIG) >> $(LOG) 2>&1 &
 	sleep 2
 	@cat $(PIDFILE) 2>/dev/null && echo "Restarted. Log: $(LOG)" || echo "WARNING: may not have started, check $(LOG)"
 

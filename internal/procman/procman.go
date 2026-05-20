@@ -211,9 +211,16 @@ func (p *Process) readOutput(stdout io.Reader) {
 }
 
 func (p *Process) waitForExit() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[procman] waitForExit panic recovered: %v", r)
+		}
+		p.mu.Lock()
+		p.alive = false
+		p.mu.Unlock()
+	}()
 	err := p.cmd.Wait()
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.alive && err != nil {
 		select {
 		case p.output <- agent.OutputChunk{
@@ -223,7 +230,7 @@ func (p *Process) waitForExit() {
 		default:
 		}
 	}
-	p.alive = false
+	p.mu.Unlock()
 }
 
 // claudeStreamJSON is the JSON format for Claude Code stream-json output.

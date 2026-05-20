@@ -142,6 +142,11 @@ func main() {
 
 	// Wire worker bot handlers globally via gateway.
 	gw.SetWorkerMessageHandler(func(msg channel.Message) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[main] worker message handler panic: %v", r)
+			}
+		}()
 		rtr.HandleWorkerMessage(msg)
 	})
 	gw.SetWorkerEventHandler(func(msg channel.Message) {
@@ -151,6 +156,11 @@ func main() {
 
 	// Wire control bot message handling.
 	ctrlChan.OnMessage(func(msg channel.Message) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[main] control message handler panic: %v", r)
+			}
+		}()
 		ctx := context.Background()
 		reply := ctrl.HandleMessage(ctx, msg)
 		if reply != "" {

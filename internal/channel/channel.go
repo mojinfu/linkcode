@@ -66,6 +66,12 @@ type Channel interface {
 	// OnEvent registers a handler for platform events (enter_chat, etc.).
 	OnEvent(handler EventHandler)
 
+	// PrepareClose signals the channel to stop accepting new messages and
+	// returns a channel that closes when all internal goroutines have exited.
+	// The caller should call Close() after the returned channel closes to
+	// tear down the underlying connection.
+	PrepareClose() <-chan struct{}
+
 	// Close gracefully closes the connection.
 	Close() error
 

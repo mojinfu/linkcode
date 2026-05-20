@@ -19,6 +19,25 @@ import (
 	"linkcode/internal/session"
 )
 
+const (
+	// spinnerFrames defines the 8-frame Braille spinner sequence.
+	spinnerFrames = "⣷⣯⣟⡿⢿⣻⣽⣾"
+	// spinnerMinInterval is the fastest spin rate, used when tokens are flowing.
+	spinnerMinInterval = 200 * time.Millisecond
+	// spinnerMaxInterval is the slowest spin rate, used when idle.
+	spinnerMaxInterval = 1 * time.Second
+	// spinnerDecelStep is how much the interval grows per tick without a chunk.
+	spinnerDecelStep = 200 * time.Millisecond
+)
+
+// streamCache holds the important parts of a streaming reply so that
+// on stream failure the content can be resent as a regular (non-stream) message.
+type streamCache struct {
+	textBuf      strings.Builder
+	fullResponse string
+	question     *agent.Question
+}
+
 // Router forwards messages between users and agent processes.
 type Router struct {
 	sessionMgr  *session.Manager
@@ -146,6 +165,14 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 		return
 	}
 
+	// Voice messages are not transcribed by WeCom — content is always empty.
+	// Reject early, before any state change or Claude launch, to avoid
+	// triggering stream bubbles or status updates for an unsupported type.
+	if msg.MsgType == "voice" {
+		r.sendReply(msg, "语音消息暂不支持，请发送文字消息。")
+		return
+	}
+
 	// Bootstrap status session (no message sent — state stays internal until first change).
 	r.statusMgr.Send(StatusEvent{
 		SessionID:   sess.ID,
@@ -158,7 +185,15 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 
 	if msg.Content == "/end" {
 		r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateSleeped})
-		r.gw.CloseWorkerChannel(sess.BoundBotID)
+
+		// Send sleep bubble before tearing down the channel so the user
+		// sees a proper goodbye instead of radio silence.
+		streamID := fmt.Sprintf("stream_%s_%d", msg.ID, time.Now().UnixNano())
+		sleepText := fmt.Sprintf("[💤] %s 我先睡啦 ZZZ", sess.Name)
+		r.sendStreamReply(msg, sleepText, streamID, true)
+
+		// Release bot and mark session as sleeped — no new messages will
+		// be routed to this session.
 		if sess.BoundBotID > 0 {
 			if err := r.botPool.Release(sess.BoundBotID); err != nil {
 				log.Printf("[router] release bot %d: %v", sess.BoundBotID, err)
@@ -167,7 +202,28 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 		if err := r.sessionMgr.MarkSleeped(sess.ID); err != nil {
 			log.Printf("[router] mark sleeped %d: %v", sess.ID, err)
 		}
-		r.sendReply(msg, "会话已结束。Session 记录已保留，Bot 已归还池中。")
+
+		// Signal prepare-to-close: cancel the context to stop heartbeat and
+		// signal readLoop to exit. After readLoop has finished, give the
+		// WeCom server 2s to render the sleep stream bubble, then tear down
+		// the WebSocket. Without this delay, readLoop exits immediately when
+		// the message handler returns (since ctx is already cancelled),
+		// done closes within microseconds, and the server may close the
+		// connection before it finishes rendering the stream.
+		ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
+		if ok {
+			done := ch.PrepareClose()
+			boundBotID := sess.BoundBotID
+			go func() {
+				select {
+				case <-done:
+				case <-time.After(10 * time.Second):
+					log.Printf("[router] prepareClose timeout for bot %d, closing anyway", boundBotID)
+				}
+				time.Sleep(2 * time.Second)
+				r.gw.CloseWorkerChannel(boundBotID)
+			}()
+		}
 		return
 	}
 
@@ -228,46 +284,108 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 	}
 
 	streamID := fmt.Sprintf("stream_%d", time.Now().UnixNano())
-	thinkPrefix := fmt.Sprintf("[◐] %s thinking...\n\n", sess.Name)
+	spinnerRunes := []rune(spinnerFrames)
+	// spinnerIconIdx advances only on ticker, giving a smooth fixed-cadence spin.
+	spinnerIconIdx := 0
+	spinnerDotIdx := 0 // advances per frame sent, for the dots animation
+	spinnerInterval := spinnerMaxInterval
+	ticker := time.NewTicker(spinnerInterval)
+	defer ticker.Stop()
 
-	// Send initial thinking frame so the user sees status in the reply stream.
-	r.sendStreamReply(msg, thinkPrefix, streamID, false)
+	var cache streamCache
+	streamBroken := false
 
-	var builder strings.Builder
-	var fullResponse string
-	var question *agent.Question
-	for chunk := range outputCh {
-		switch chunk.Kind {
-		case agent.KindError:
-			log.Printf("[router] agent error: %s", chunk.Content)
-			r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateDizzy})
-			r.sendStreamReply(msg, fmt.Sprintf("[💫] %s error\n\n%s", sess.Name, chunk.Content), streamID, true)
-			return
-		case agent.KindText:
-			builder.WriteString(chunk.Content)
-			r.sendStreamReply(msg, thinkPrefix+builder.String(), streamID, false)
-		case agent.KindQuestion:
-			question = chunk.Question
-		case agent.KindFinal:
-			fullResponse = chunk.Content
-		case agent.KindThinking, agent.KindToolUse:
+	// Send initial spinner frame.
+	spinnerDotIdx++
+	if !r.sendStreamReply(msg, spinPrefix(spinnerRunes, spinnerIconIdx, spinnerDotIdx, sess.Name), streamID, false) {
+		streamBroken = true
+	}
+
+	for {
+		select {
+		case chunk, ok := <-outputCh:
+			if !ok {
+				goto done
+			}
+			spinnerDotIdx++
+			log.Printf("[router] chunk kind=%s contentLen=%d", chunk.Kind, len(chunk.Content))
+			switch chunk.Kind {
+			case agent.KindError:
+				log.Printf("[router] agent error: %s", chunk.Content)
+				r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateDizzy})
+				r.sendStreamReply(msg, fmt.Sprintf("[💫] %s error\n\n%s", sess.Name, chunk.Content), streamID, true)
+				return
+			case agent.KindText:
+				cache.textBuf.WriteString(chunk.Content)
+				if !r.sendStreamReply(msg, spinPrefix(spinnerRunes, spinnerIconIdx, spinnerDotIdx, sess.Name)+cache.textBuf.String(), streamID, false) {
+					streamBroken = true
+				}
+				spinnerInterval = spinnerMinInterval
+				ticker.Reset(spinnerInterval)
+			case agent.KindQuestion:
+				cache.question = chunk.Question
+			case agent.KindFinal:
+				cache.fullResponse = chunk.Content
+			case agent.KindThinking, agent.KindToolUse:
+				if chunk.Content != "" {
+					spinnerInterval = spinnerMinInterval
+					ticker.Reset(spinnerInterval)
+				}
+			}
+		case <-ticker.C:
+			if streamBroken {
+				continue
+			}
+			spinnerIconIdx++
+			spinnerDotIdx++
+			frameText := spinPrefix(spinnerRunes, spinnerIconIdx, spinnerDotIdx, sess.Name)
+			if cache.textBuf.Len() > 0 {
+				frameText += cache.textBuf.String()
+			}
+			// Decelerate: slow down toward max interval.
+			if spinnerInterval < spinnerMaxInterval {
+				spinnerInterval += spinnerDecelStep
+				if spinnerInterval > spinnerMaxInterval {
+					spinnerInterval = spinnerMaxInterval
+				}
+				ticker.Reset(spinnerInterval)
+			}
+			log.Printf("[router] ticker frame icon=%d dots=%d interval=%v", spinnerIconIdx%len(spinnerRunes), spinnerDotIdx%4, spinnerInterval)
+			if !r.sendStreamReply(msg, frameText, streamID, false) {
+				log.Printf("[router] ticker send failed, marking stream broken")
+				streamBroken = true
+			}
 		}
 	}
 
-	// Build final frame with "done" status prefix.
-	responseText := builder.String()
+done:
+	responseText := cache.textBuf.String()
 	if responseText == "" {
-		responseText = fullResponse
+		responseText = cache.fullResponse
 	}
-	doneText := fmt.Sprintf("[✓] %s stand by\n\n%s", sess.Name, responseText)
-	r.sendStreamReply(msg, doneText, streamID, true)
 
-	// If Claude asked a question, store it and send formatted menu to IM.
-	if question != nil {
-		r.mu.Lock()
-		r.pendingQuestions[sess.ID] = question
-		r.mu.Unlock()
-		r.sendQuestionMenu(msg, question)
+	if streamBroken {
+		// Stream connection was lost. Send cached content as a regular message.
+		if responseText != "" {
+			r.sendReply(msg, responseText)
+		}
+		if cache.question != nil {
+			r.mu.Lock()
+			r.pendingQuestions[sess.ID] = cache.question
+			r.mu.Unlock()
+			r.sendQuestionMenu(msg, cache.question)
+		}
+	} else {
+		// Normal path: send final stream frame.
+		doneText := fmt.Sprintf("[✓] %s stand by\n\n%s", sess.Name, responseText)
+		r.sendStreamReply(msg, doneText, streamID, true)
+
+		if cache.question != nil {
+			r.mu.Lock()
+			r.pendingQuestions[sess.ID] = cache.question
+			r.mu.Unlock()
+			r.sendQuestionMenu(msg, cache.question)
+		}
 	}
 
 	// Save agent response to history.
@@ -336,11 +454,18 @@ func (r *Router) sendQuestionMenu(msg channel.Message, q *agent.Question) {
 	}
 }
 
-func (r *Router) sendStreamReply(msg channel.Message, text string, streamID string, finish bool) {
+// spinPrefix builds the stream prefix for the current spinner frame.
+func spinPrefix(runes []rune, iconIdx int, dotIdx int, name string) string {
+	icon := string(runes[iconIdx%len(runes)])
+	dots := strings.Repeat(".", (dotIdx%4)+1)
+	return fmt.Sprintf("[%s] %s thinking%s\n\n", icon, name, dots)
+}
+
+func (r *Router) sendStreamReply(msg channel.Message, text string, streamID string, finish bool) bool {
 	ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
 	if !ok {
 		log.Printf("[router] no channel for bot %s", msg.BotID)
-		return
+		return false
 	}
 	if err := ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
 		Text:          text,
@@ -351,7 +476,9 @@ func (r *Router) sendStreamReply(msg channel.Message, text string, streamID stri
 		StreamFinish:  finish,
 	}); err != nil {
 		log.Printf("[router] send stream reply: %v", err)
+		return false
 	}
+	return true
 }
 
 func (r *Router) sendReply(msg channel.Message, text string) {
