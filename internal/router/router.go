@@ -46,19 +46,21 @@ type Router struct {
 	gw          *gateway.Gateway
 	statusMgr   *StatusManager
 
-	mu              sync.Mutex
-	pendingQuestions map[int64]*agent.Question // sessionID -> pending question
+	mu                 sync.Mutex
+	pendingQuestions   map[int64]*agent.Question // sessionID -> pending question
+	interruptedSessions map[int64]bool           // sessionID -> process was /stop'd
 }
 
 // New creates a new Router.
 func New(sessMgr *session.Manager, pool *botpool.Pool, runner agent.Runner, gw *gateway.Gateway, statusMgr *StatusManager) *Router {
 	return &Router{
-		sessionMgr:       sessMgr,
-		botPool:          pool,
-		agentRunner:      runner,
-		gw:               gw,
-		statusMgr:        statusMgr,
-		pendingQuestions: make(map[int64]*agent.Question),
+		sessionMgr:         sessMgr,
+		botPool:            pool,
+		agentRunner:        runner,
+		gw:                 gw,
+		statusMgr:          statusMgr,
+		pendingQuestions:   make(map[int64]*agent.Question),
+		interruptedSessions: make(map[int64]bool),
 	}
 }
 
@@ -175,6 +177,9 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 
 	if msg.Content == "/stop" {
 		if r.agentRunner.Interrupt(fmt.Sprintf("%d", sess.ID)) {
+			r.mu.Lock()
+			r.interruptedSessions[sess.ID] = true
+			r.mu.Unlock()
 			r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateSleeped})
 			r.sendReply(msg, fmt.Sprintf("Session %d 已暂停思考", sess.ID))
 		} else {
@@ -369,6 +374,16 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 	}
 
 done:
+	// If the session was /stop'd, the done: block runs after the stop handler
+	// has already replied. Skip the final frame to avoid a confusing duplicate message.
+	r.mu.Lock()
+	interrupted := r.interruptedSessions[sess.ID]
+	delete(r.interruptedSessions, sess.ID)
+	r.mu.Unlock()
+	if interrupted {
+		return
+	}
+
 	responseText := cache.textBuf.String()
 	if responseText == "" {
 		responseText = cache.fullResponse

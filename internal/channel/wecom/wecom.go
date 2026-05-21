@@ -450,7 +450,7 @@ func (c *Channel) readLoop() {
 			continue
 		}
 		attempt = 0
-		c.handleMessage(msg)
+		go c.handleMessage(msg)
 	}
 }
 
