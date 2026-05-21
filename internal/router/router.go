@@ -173,6 +173,16 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 		return
 	}
 
+	if msg.Content == "/stop" {
+		if r.agentRunner.Interrupt(fmt.Sprintf("%d", sess.ID)) {
+			r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateSleeped})
+			r.sendReply(msg, fmt.Sprintf("Session %d 已暂停思考", sess.ID))
+		} else {
+			r.sendReply(msg, "当前没有正在思考的进程")
+		}
+		return
+	}
+
 	// Bootstrap status session (no message sent — state stays internal until first change).
 	r.statusMgr.Send(StatusEvent{
 		SessionID:   sess.ID,

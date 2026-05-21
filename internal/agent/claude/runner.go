@@ -88,6 +88,21 @@ func (r *Runner) Resume(ctx context.Context, linkCodeSessionID, claudeSessionID 
 	return s, nil
 }
 
+// Interrupt stops the active process for a LinkCode session without removing
+// the session record from the database. Returns true if a process was killed.
+func (r *Runner) Interrupt(linkCodeSessionID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	s, ok := r.sessions[linkCodeSessionID]
+	if !ok || !s.process.IsAlive() {
+		return false
+	}
+	s.process.Stop()
+	delete(r.sessions, linkCodeSessionID)
+	return true
+}
+
 // removeSession is called by Session.Stop to clean up the map entry.
 func (r *Runner) removeSession(id string) {
 	r.mu.Lock()
