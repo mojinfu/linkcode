@@ -198,3 +198,92 @@ func resolveAnswer(qi agent.QuestionItem, input string) string {
 	return strings.Join(labels, ", ")
 }
 
+// sendQuestionMenu formats a structured question as an IM menu and sends it.
+func (r *Router) sendQuestionMenu(msg channel.Message, q *agent.Question) {
+	ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
+	if !ok {
+		return
+	}
+
+	for i, qi := range q.Questions {
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("📋 %s\n\n", qi.Question))
+		for j, opt := range qi.Options {
+			sb.WriteString(fmt.Sprintf("%d. %s", j+1, opt.Label))
+			if opt.Description != "" {
+				sb.WriteString(fmt.Sprintf(" - %s", opt.Description))
+			}
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n回复数字选择")
+		if qi.MultiSelect {
+			sb.WriteString("（可多选，用逗号分隔）")
+		}
+		sb.WriteString("，或引用此消息回复。")
+
+		ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
+			Text:          sb.String(),
+			ReplyToID:     msg.ID,
+			OriginalReqID: msg.ReqID,
+			ChatID:        msg.ChatID,
+		})
+
+		if len(q.Questions) > 1 && i > 0 {
+			_ = i // TODO: multi-question support
+		}
+	}
+}
+
+// buildQuotePrefix formats the first n characters of the user's original message
+// as a markdown blockquote prefix, so the fallback proactive message gives context
+// about which user message it is responding to.
+func buildQuotePrefix(userMsg string, n int) string {
+	runes := []rune(userMsg)
+	if len(runes) > n {
+		return fmt.Sprintf("> %s...\n\n", string(runes[:n]))
+	}
+	return fmt.Sprintf("> %s\n\n", userMsg)
+}
+
+// spinPrefix builds the stream prefix for the current spinner frame.
+func spinPrefix(runes []rune, iconIdx int, dotIdx int, name string) string {
+	icon := string(runes[iconIdx%len(runes)])
+	dots := strings.Repeat(".", (dotIdx%4)+1)
+	return fmt.Sprintf("[%s] %s thinking%s\n\n", icon, name, dots)
+}
+
+func (r *Router) sendStreamReply(msg channel.Message, text string, streamID string, finish bool) bool {
+	ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
+	if !ok {
+		log.Printf("[router] no channel for bot %s", msg.BotID)
+		return false
+	}
+	if err := ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
+		Text:          text,
+		ReplyToID:     msg.ID,
+		OriginalReqID: msg.ReqID,
+		ChatID:        msg.ChatID,
+		StreamID:      streamID,
+		StreamFinish:  finish,
+	}); err != nil {
+		log.Printf("[router] send stream reply: %v", err)
+		return false
+	}
+	return true
+}
+
+func (r *Router) sendReply(msg channel.Message, text string) {
+	ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
+	if !ok {
+		log.Printf("[router] no channel for bot %s", msg.BotID)
+		return
+	}
+	if err := ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
+		Text:          text,
+		ReplyToID:     msg.ID,
+		OriginalReqID: msg.ReqID,
+		ChatID:        msg.ChatID,
+	}); err != nil {
+		log.Printf("[router] send reply: %v", err)
+	}
+}

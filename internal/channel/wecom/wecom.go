@@ -65,6 +65,10 @@ type Channel struct {
 	// pendingAcks tracks proactive messages waiting for server ack.
 	ackMu       sync.Mutex
 	pendingAcks map[string]chan error // req_id -> ack result
+
+	// uploadResps stores response bodies for media upload commands.
+	uploadMu    sync.RWMutex
+	uploadResps map[string]json.RawMessage // req_id -> response body
 }
 
 // New creates a new WeCom Channel.
@@ -74,6 +78,7 @@ func New(botID, secret string) *Channel {
 		botID:       botID,
 		secret:      secret,
 		pendingAcks: make(map[string]chan error),
+		uploadResps: make(map[string]json.RawMessage),
 	}
 }
 
@@ -262,6 +267,11 @@ func (c *Channel) sendProactive(userID string, content channel.MessageContent) e
 
 func (c *Channel) dispatchAck(env wecomEnvelope) {
 	reqID := env.Headers.ReqID
+
+	c.uploadMu.Lock()
+	c.uploadResps[reqID] = env.Body
+	c.uploadMu.Unlock()
+
 	c.ackMu.Lock()
 	ch, ok := c.pendingAcks[reqID]
 	if ok {
