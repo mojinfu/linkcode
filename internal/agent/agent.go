@@ -55,6 +55,10 @@ type Runner interface {
 	// providerSessionID is the agent-provider-specific session ID (e.g. Claude's --session-id).
 	Resume(ctx context.Context, linkCodeSessionID, providerSessionID string) (Session, error)
 
+	// Interrupt stops the active process for the given LinkCode session.
+	// Returns true if a process was running and has been stopped.
+	Interrupt(linkCodeSessionID string) bool
+
 	// Name returns the agent type name (e.g. "claude-code", "kimi-code").
 	Name() string
 }

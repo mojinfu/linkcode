@@ -25,11 +25,11 @@ func TestHandleMessage_Start(t *testing.T) {
 	if !strings.Contains(reply, "欢迎使用 LinkCode") {
 		t.Errorf("expected welcome message, got: %s", reply)
 	}
-	if !strings.Contains(reply, "1. 创建新 Agent") {
+	if !strings.Contains(reply, "1. 添加新 Bot") {
 		t.Errorf("expected menu option 1, got: %s", reply)
 	}
-	if !strings.Contains(reply, "5. 结束 Agent") {
-		t.Errorf("expected menu option 5, got: %s", reply)
+	if !strings.Contains(reply, "4. 结束 Agent") {
+		t.Errorf("expected menu option 4, got: %s", reply)
 	}
 
 	t.Logf("Reply:\n%s", reply)
@@ -50,35 +50,20 @@ func TestHandleMessage_MenuNavigations(t *testing.T) {
 		t.Fatal("/start should show menu")
 	}
 
-	// Option 1 → agent type selection
+	// Option 1 → addbot instructions
 	msg.Content = "1"
 	reply = ctrl.HandleMessage(ctx, msg)
-	if !strings.Contains(reply, "请选择 Agent 类型") {
-		t.Errorf("option 1: expected agent type selection, got: %s", reply)
+	if !strings.Contains(reply, "/addbot") {
+		t.Errorf("option 1: expected addbot instructions, got: %s", reply)
 	}
-
-	// Send /start again to reset → main menu
-	msg.Content = "/start"
-	reply = ctrl.HandleMessage(ctx, msg)
-	if !strings.Contains(reply, "欢迎使用 LinkCode") {
-		t.Fatal("second /start should show menu")
-	}
-
-	// Option 3 → add bot instructions
-	msg.Content = "3"
-	reply = ctrl.HandleMessage(ctx, msg)
-	if !strings.Contains(reply, "格式") {
-		t.Errorf("option 3: expected addbot format hint, got: %s", reply)
-	}
-	t.Logf("option 3: %s", reply)
 
 	// Invalid option
 	msg.Content = "/start"
 	ctrl.HandleMessage(ctx, msg)
 	msg.Content = "99"
 	reply = ctrl.HandleMessage(ctx, msg)
-	if !strings.Contains(reply, "请回复数字 1-5") {
-		t.Errorf("invalid option: expected prompt for 1-5, got: %s", reply)
+	if !strings.Contains(reply, "请回复数字 1-4") {
+		t.Errorf("invalid option: expected prompt for 1-4, got: %s", reply)
 	}
 }
 
@@ -105,16 +90,16 @@ func TestHandleMessage_QuoteMainMenu(t *testing.T) {
 	ctx := context.Background()
 	uid := "user-quote-1"
 
-	// Quote main menu text + reply "1" → should enter agent type selection.
+	// Quote main menu text + reply "1" → should show addbot instructions.
 	msg := channel.Message{
 		UserID:       uid,
 		Content:      "1",
 		MsgType:      channel.MsgTypeText,
-		QuoteContent: "欢迎使用 LinkCode！请选择操作：\n1. 创建新 Agent",
+		QuoteContent: "欢迎使用 LinkCode！请选择操作：\n1. 添加新 Bot",
 	}
 	reply := ctrl.HandleMessage(ctx, msg)
-	if !strings.Contains(reply, "请选择 Agent 类型") {
-		t.Errorf("quoting main menu + '1': expected agent type selection, got: %s", reply)
+	if !strings.Contains(reply, "/addbot") {
+		t.Errorf("quoting main menu + '1': expected addbot instructions, got: %s", reply)
 	}
 }
 
@@ -147,14 +132,14 @@ func TestHandleMessage_NoQuoteStillWorks(t *testing.T) {
 	ctx := context.Background()
 	uid := "user-noquote"
 
-	// /start then "1" without quote → should work as before.
+	// /start then "1" without quote → should show addbot instructions.
 	msg := channel.Message{UserID: uid, Content: "/start", MsgType: channel.MsgTypeText}
 	ctrl.HandleMessage(ctx, msg)
 
 	msg = channel.Message{UserID: uid, Content: "1", MsgType: channel.MsgTypeText}
 	reply := ctrl.HandleMessage(ctx, msg)
-	if !strings.Contains(reply, "请选择 Agent 类型") {
-		t.Errorf("no quote + '1': expected agent type selection, got: %s", reply)
+	if !strings.Contains(reply, "/addbot") {
+		t.Errorf("no quote + '1': expected addbot instructions, got: %s", reply)
 	}
 }
 
@@ -173,9 +158,8 @@ func TestDetectMenuStage_AllMenus(t *testing.T) {
 		quotedText string
 		want       MenuState
 	}{
-		{"欢迎使用 LinkCode！请选择操作：\n1. 创建新 Agent", MenuMain},
-		{"请选择 Agent 类型：\n1. Claude Code", MenuCreateAgentType},
-		{"请为这个 Agent 命名（输入名称或回复\"跳过\"使用默认名称）", MenuCreateAgentName},
+		{"欢迎使用 LinkCode！请选择操作：\n1. 添加新 Bot", MenuMain},
+		{"请选择 Agent 类型：\n1. Claude Code", MenuAddBotAgentType},
 		{"请选择要结束的 Agent（回复数字）：\n1. test", MenuEndAgentConfirm},
 		{"随机消息", MenuNone},
 		{"", MenuNone},
@@ -186,4 +170,22 @@ func TestDetectMenuStage_AllMenus(t *testing.T) {
 			t.Errorf("detectMenuStage(%q) = %v, want %v", tt.quotedText, got, tt.want)
 		}
 	}
+}
+
+func TestHandleMessage_Help(t *testing.T) {
+	ctrl := &Controller{
+		userStates: make(map[string]*userState),
+	}
+
+	ctx := context.Background()
+	msg := channel.Message{UserID: "u", Content: "/help", MsgType: channel.MsgTypeText}
+
+	reply := ctrl.HandleMessage(ctx, msg)
+	if !strings.Contains(reply, "/start") {
+		t.Errorf("expected /start in help, got: %s", reply)
+	}
+	if !strings.Contains(reply, "/addbot") {
+		t.Errorf("expected /addbot in help, got: %s", reply)
+	}
+	t.Logf("/help: %s", reply)
 }
