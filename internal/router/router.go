@@ -89,10 +89,16 @@ func (r *Router) HandleWorkerEvent(msg channel.Message) {
 func (r *Router) HandleWorkerMessage(msg channel.Message) {
 	log.Printf("[router] msg from %s: %s", msg.UserID, msg.Content)
 
+	// /help works without a session lookup.
+	if parseCommand(msg.Content) == "/help" {
+		r.handleHelp(msg)
+		return
+	}
+
 	sess, err := r.sessionMgr.GetByPlatformBotID(msg.BotID)
 	if err != nil {
 		log.Printf("[router] session not found for bot %s: %v", msg.BotID, err)
-		r.sendReply(msg, "找不到对应的 Session，请通过总控 Bot 重新创建。")
+		r.sendReply(msg, "找不到对应的 Session，请联系管理员。")
 		return
 	}
 

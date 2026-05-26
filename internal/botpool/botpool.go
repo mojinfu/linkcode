@@ -1,5 +1,6 @@
-// Package botpool manages the pool of pre-created IM Bot credentials.
-// Bots are added via /addbot command, stored encrypted, and allocated to sessions on demand.
+// Package botpool manages pre-created IM Bot credentials.
+// In the simplified model, each bot is always bound to a session
+// (one bot = one agent). There is no idle pool or allocate/release cycle.
 package botpool
 
 import (
@@ -10,16 +11,13 @@ import (
 	"linkcode/internal/store"
 )
 
-// ErrNoIdleBots is returned when the pool has no available bots.
-var ErrNoIdleBots = errors.New("botpool: no idle bots available")
-
-// Bot represents a bot in the pool with its decrypted secret.
+// Bot represents a bot with its decrypted secret.
 type Bot struct {
-	ID      int64
-	BotID   string
-	Name    string
-	Secret  string // decrypted
-	Status  store.BotStatus
+	ID     int64
+	BotID  string
+	Name   string
+	Secret string // decrypted
+	Status store.BotStatus
 }
 
 // Pool manages bot lifecycle.
@@ -48,64 +46,42 @@ func (p *Pool) Add(botID, name, secret string) (*Bot, error) {
 	return &Bot{ID: id, BotID: botID, Name: name, Secret: secret, Status: store.BotIdle}, nil
 }
 
-// Allocate picks an idle bot, binds it to a session, and returns it with decrypted secret.
-func (p *Pool) Allocate(sessionID int64) (*Bot, error) {
-	bots, err := p.db.ListIdleBots()
-	if err != nil {
-		return nil, fmt.Errorf("botpool: list idle: %w", err)
-	}
-	if len(bots) == 0 {
-		return nil, ErrNoIdleBots
-	}
-
-	// Pick the least recently used idle bot.
-	record := &bots[0]
-
-	secret, err := crypto.Decrypt(record.BotSecretEncrypted, p.encKey)
-	if err != nil {
-		return nil, fmt.Errorf("botpool: decrypt secret: %w", err)
-	}
-
-	if err := p.db.BindBot(record.ID, sessionID); err != nil {
-		return nil, fmt.Errorf("botpool: bind bot: %w", err)
-	}
-
-	return &Bot{
-		ID:     record.ID,
-		BotID:  record.BotID,
-		Name:   record.BotName,
-		Secret: secret,
-		Status: store.BotBound,
-	}, nil
-}
-
-// Release returns a bot to the idle pool.
-func (p *Pool) Release(botInternalID int64) error {
-	return p.db.ReleaseBot(botInternalID)
-}
-
-// GetBotBySession returns the bot bound to a given session, or nil if none.
-func (p *Pool) GetBotBySession(botInternalID int64) (*Bot, error) {
-	record, err := p.db.GetBotByID(botInternalID)
+// GetByPlatformBotID looks up a bot by its platform bot_id and returns it with decrypted secret.
+// Returns (nil, nil) when no bot is found.
+func (p *Pool) GetByPlatformBotID(platformBotID string) (*Bot, error) {
+	record, err := p.db.GetBotByBotID(platformBotID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
+	return p.recordToBot(record)
+}
 
-	secret, err := crypto.Decrypt(record.BotSecretEncrypted, p.encKey)
+// GetByID looks up a bot by internal ID.
+func (p *Pool) GetByID(id int64) (*Bot, error) {
+	record, err := p.db.GetBotByID(id)
 	if err != nil {
-		return nil, fmt.Errorf("botpool: decrypt secret: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
 	}
+	return p.recordToBot(record)
+}
 
-	return &Bot{
-		ID:     record.ID,
-		BotID:  record.BotID,
-		Name:   record.BotName,
-		Secret: secret,
-		Status: record.Status,
-	}, nil
+// BindToSession binds a specific bot to a session. The bot must be idle.
+func (p *Pool) BindToSession(botInternalID, sessionID int64) error {
+	if err := p.db.BindBot(botInternalID, sessionID); err != nil {
+		return fmt.Errorf("botpool: bind to session: %w", err)
+	}
+	return nil
+}
+
+// Release returns a bot to the idle pool without closing any WebSocket.
+func (p *Pool) Release(botInternalID int64) error {
+	return p.db.ReleaseBot(botInternalID)
 }
 
 // List returns all bots in the pool.
@@ -132,7 +108,21 @@ func (p *Pool) List() ([]Bot, error) {
 	return bots, nil
 }
 
-// Remove deletes a bot from the pool. Cannot remove a bound bot.
+// Remove deletes a bot from the pool.
 func (p *Pool) Remove(botInternalID int64) error {
 	return p.db.DeleteBot(botInternalID)
+}
+
+func (p *Pool) recordToBot(record *store.BotRecord) (*Bot, error) {
+	secret, err := crypto.Decrypt(record.BotSecretEncrypted, p.encKey)
+	if err != nil {
+		return nil, fmt.Errorf("botpool: decrypt secret: %w", err)
+	}
+	return &Bot{
+		ID:     record.ID,
+		BotID:  record.BotID,
+		Name:   record.BotName,
+		Secret: secret,
+		Status: record.Status,
+	}, nil
 }

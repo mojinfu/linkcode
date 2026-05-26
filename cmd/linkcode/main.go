@@ -183,11 +183,11 @@ func main() {
 	defer ctrlChan.Close()
 	log.Printf("control bot %s connected to WeCom", cfg.ControlBot.BotID)
 
-	// Reconnect worker bots for active (waked) sessions on startup.
+	// Reconnect worker bots for all bound sessions on startup.
 	activeSessions, _ := sessionMgr.ListActive()
 	for _, s := range activeSessions {
-		if s.ProcessStatus == "waked" && s.BoundBotID > 0 {
-			bot, err := botPool.GetBotBySession(s.BoundBotID)
+		if s.BoundBotID > 0 {
+			bot, err := botPool.GetByID(s.BoundBotID)
 			if err != nil || bot == nil {
 				log.Printf("[main] skip session %d: bot %d not found", s.ID, s.BoundBotID)
 				continue

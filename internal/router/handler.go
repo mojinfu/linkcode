@@ -24,55 +24,113 @@ func (r *Router) handleCommand(msg channel.Message, sess *session.Session) {
 		r.handleStop(msg, sess)
 	case "/end":
 		r.handleEnd(msg, sess)
+	case "/new":
+		r.handleNew(msg, sess)
+	case "/help":
+		r.handleHelp(msg)
 	default:
-		r.sendReply(msg, fmt.Sprintf("未知命令: %s。可用命令: /stop /end", cmd))
+		r.sendReply(msg, fmt.Sprintf("未知命令: %s。发送 /help 查看可用命令。", cmd))
 	}
 }
 
 // handleStop interrupts the running agent process for this session.
+// The stream loop at done: handles the visual update; we only set the flag here
+// so it knows this was a /stop rather than a crash.
 func (r *Router) handleStop(msg channel.Message, sess *session.Session) {
 	if r.agentRunner.Interrupt(fmt.Sprintf("%d", sess.ID)) {
 		r.mu.Lock()
 		r.interruptedSessions[sess.ID] = true
 		r.mu.Unlock()
 		r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateSleeped})
-		r.sendReply(msg, fmt.Sprintf("[✗] %s interrupted, stand by", sess.Name))
 	} else {
 		r.sendReply(msg, "当前没有正在思考的进程")
 	}
 }
 
-// handleEnd tears down the worker bot connection and marks the session as sleeped.
+// handleEnd marks the session as sleeped without closing the WebSocket,
+// so the bot stays online and can receive /new to start a fresh session.
 func (r *Router) handleEnd(msg channel.Message, sess *session.Session) {
 	r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateSleeped})
 
 	streamID := fmt.Sprintf("stream_%s_%d", msg.ID, time.Now().UnixNano())
-	sleepText := fmt.Sprintf("[💤] %s 我先睡啦 ZZZ", sess.Name)
+	sleepText := fmt.Sprintf("[💤] %s 我先睡啦 ZZZ\n\n发送 /new 开始新对话，发送 /help 查看更多命令", sess.Name)
 	r.sendStreamReply(msg, sleepText, streamID, true)
 
-	if sess.BoundBotID > 0 {
-		if err := r.botPool.Release(sess.BoundBotID); err != nil {
-			log.Printf("[router] release bot %d: %v", sess.BoundBotID, err)
-		}
-	}
 	if err := r.sessionMgr.MarkSleeped(sess.ID); err != nil {
 		log.Printf("[router] mark sleeped %d: %v", sess.ID, err)
 	}
+}
 
-	ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
-	if ok {
-		done := ch.PrepareClose()
-		boundBotID := sess.BoundBotID
-		go func() {
-			select {
-			case <-done:
-			case <-time.After(10 * time.Second):
-				log.Printf("[router] prepareClose timeout for bot %d, closing anyway", boundBotID)
-			}
-			time.Sleep(2 * time.Second)
-			r.gw.CloseWorkerChannel(boundBotID)
-		}()
+// handleNew resets the worker bot by preserving the old session and creating a new one,
+// rebinding the same bot without closing the WebSocket connection.
+func (r *Router) handleNew(msg channel.Message, sess *session.Session) {
+	oldSessionID := sess.ID
+	hadClaudeSession := sess.ClaudeSessionID != ""
+
+	// Interrupt if process is running.
+	if sess.ProcessStatus == "waked" {
+		r.agentRunner.Interrupt(fmt.Sprintf("%d", sess.ID))
+		r.mu.Lock()
+		delete(r.interruptedSessions, sess.ID)
+		r.mu.Unlock()
 	}
+
+	// Release bot from old session (makes bot idle in DB).
+	if err := r.botPool.Release(sess.BoundBotID); err != nil {
+		log.Printf("[router] handleNew: release bot %d: %v", sess.BoundBotID, err)
+	}
+
+	// Mark old session as sleeped.
+	if err := r.sessionMgr.MarkSleeped(sess.ID); err != nil {
+		log.Printf("[router] handleNew: mark sleeped %d: %v", sess.ID, err)
+	}
+
+	// Clean up old session state.
+	r.mu.Lock()
+	delete(r.pendingQuestions, sess.ID)
+	delete(r.interruptedSessions, sess.ID)
+	r.mu.Unlock()
+	r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateSleeped})
+
+	// Create a new session with auto-generated name.
+	newName := fmt.Sprintf("Agent-%d", time.Now().Unix())
+	newSess, err := r.sessionMgr.Create(newName, "claude-code", "", 0)
+	if err != nil {
+		log.Printf("[router] handleNew: create session: %v", err)
+		r.sendReply(msg, fmt.Sprintf("创建新 Session 失败：%v", err))
+		return
+	}
+
+	// Rebind the same bot to the new session.
+	if err := r.botPool.BindToSession(sess.BoundBotID, newSess.ID); err != nil {
+		log.Printf("[router] handleNew: bind bot %d to session %d: %v", sess.BoundBotID, newSess.ID, err)
+		r.sendReply(msg, fmt.Sprintf("绑定 Bot 失败：%v", err))
+		return
+	}
+
+	// Send welcome message.
+	var welcome string
+	if hadClaudeSession {
+		welcome = fmt.Sprintf("之前的对话内容已经清空，保存至 [%d]，开始新的对话吧，有什么任务要交给我吗？", oldSessionID)
+	} else {
+		welcome = fmt.Sprintf("你好，我是你的 work bot %s，有什么任务要交给我吗？", sess.Name)
+	}
+	r.sendReply(msg, welcome)
+
+	log.Printf("[router] handleNew: session %d -> %d (bot %d)", oldSessionID, newSess.ID, sess.BoundBotID)
+}
+
+// handleHelp sends a list of available worker bot commands to the user.
+func (r *Router) handleHelp(msg channel.Message) {
+	help := `可用命令：
+
+/new  - 清空当前对话，开始新 Session
+/stop - 中断 Agent 正在进行的思考
+/end  - 结束当前对话（可随时 /new 重新开始）
+/help - 显示本帮助信息
+
+直接发送文字消息即可与 Agent 对话。`
+	r.sendReply(msg, help)
 }
 
 // handleLLM forwards a text message to the agent and streams the response back.
@@ -231,6 +289,10 @@ done:
 	delete(r.interruptedSessions, sess.ID)
 	r.mu.Unlock()
 	if interrupted {
+		stopText := fmt.Sprintf("[✗] %s interrupted, stand by", sess.Name)
+		if !r.sendStreamReply(msg, stopText, streamID, true) {
+			r.sendReply(msg, stopText)
+		}
 		return
 	}
 
