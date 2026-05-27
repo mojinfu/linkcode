@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,18 +42,20 @@ type Controller struct {
 	botPool     *botpool.Pool
 	agentRunner agent.Runner
 	gw          *gateway.Gateway
+	workDir     string
 
 	mu         sync.Mutex
 	userStates map[string]*userState
 }
 
 // New creates a new Controller.
-func New(sessMgr *session.Manager, pool *botpool.Pool, runner agent.Runner, gw *gateway.Gateway) *Controller {
+func New(sessMgr *session.Manager, pool *botpool.Pool, runner agent.Runner, gw *gateway.Gateway, workDir string) *Controller {
 	return &Controller{
 		sessionMgr:  sessMgr,
 		botPool:     pool,
 		agentRunner: runner,
 		gw:          gw,
+		workDir:     workDir,
 		userStates:  make(map[string]*userState),
 	}
 }
@@ -216,7 +219,11 @@ func (c *Controller) handleAddBotAgentType(ctx context.Context, userID, text str
 		return "内部错误：找不到 Worker Bot 连接"
 	}
 
-	welcome := fmt.Sprintf("你好，我是你的 %s「%s」，有什么任务要交给我吗？", agentType, sessName)
+	wd := c.workDir
+	if wd == "" {
+		wd, _ = os.Getwd()
+	}
+	welcome := fmt.Sprintf("你好，我是你的 %s「%s」\n工作目录：%s\n有什么任务要交给我吗？", agentType, sessName, wd)
 	if err := workerCh.SendMessage(ctx, userID, channel.MessageContent{
 		Text:   welcome,
 		ChatID: userID,
