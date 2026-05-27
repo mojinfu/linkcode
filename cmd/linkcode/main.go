@@ -137,8 +137,8 @@ func main() {
 
 	// Initialize controller and router.
 	statusMgr := router.NewStatusManager(gw, sessionMgr)
-	ctrl := controller.New(sessionMgr, botPool, agentRunner, gw)
-	rtr := router.New(sessionMgr, botPool, agentRunner, gw, statusMgr)
+	ctrl := controller.New(sessionMgr, botPool, agentRunner, gw, cfg.Agent.ClaudeWorkDir)
+	rtr := router.New(sessionMgr, botPool, agentRunner, gw, statusMgr, cfg.Agent.ClaudeWorkDir)
 
 	// Wire worker bot handlers globally via gateway.
 	gw.SetWorkerMessageHandler(func(msg channel.Message) {

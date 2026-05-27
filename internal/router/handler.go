@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"linkcode/internal/agent"
@@ -109,11 +110,15 @@ func (r *Router) handleNew(msg channel.Message, sess *session.Session) {
 	}
 
 	// Send welcome message.
+	wd := r.workDir
+	if wd == "" {
+		wd, _ = os.Getwd()
+	}
 	var welcome string
 	if hadClaudeSession {
-		welcome = fmt.Sprintf("之前的对话内容已经清空，保存至 [%d]，开始新的对话吧，有什么任务要交给我吗？", oldSessionID)
+		welcome = fmt.Sprintf("之前的对话内容已经清空，保存至 [%d]，开始新的对话吧，有什么任务要交给我吗？\n工作目录：%s", oldSessionID, wd)
 	} else {
-		welcome = fmt.Sprintf("你好，我是你的 work bot %s，有什么任务要交给我吗？", sess.Name)
+		welcome = fmt.Sprintf("你好，我是你的 work bot %s，有什么任务要交给我吗？\n工作目录：%s", sess.Name, wd)
 	}
 	r.sendReply(msg, welcome)
 
