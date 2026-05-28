@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -175,7 +176,11 @@ func (r *Router) handleLLM(msg channel.Message, sess *session.Session) {
 	if err != nil {
 		log.Printf("[router] agent session: %v", err)
 		r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateDizzy})
-		r.sendReply(msg, "启动/唤醒 Agent 失败，请重试。")
+		if errors.Is(err, agent.ErrBusy) {
+			r.sendReply(msg, "上一个问题还在思考中，请稍候，或发送 /stop 强制中断。")
+		} else {
+			r.sendReply(msg, "启动/唤醒 Agent 失败，请重试。")
+		}
 		return
 	}
 
@@ -309,13 +314,15 @@ done:
 	if streamBroken {
 		if responseText != "" {
 			ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
-			if ok {
+			if ok && ch.IsConnected() {
 				prefix := buildQuotePrefix(msg.Content, 30)
 				doneText := fmt.Sprintf("%s[✓] %s stand by\n\n%s", prefix, sess.Name, responseText)
 				ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
 					Text:   doneText,
 					ChatID: msg.ChatID,
 				})
+			} else if responseText != "" {
+				log.Printf("[router] stream broken and channel dead for bot %s, response saved to session %d", msg.BotID, sess.ID)
 			}
 		}
 		if cache.question != nil {
