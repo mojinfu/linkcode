@@ -100,14 +100,18 @@ func (c *Controller) HandleMessage(ctx context.Context, msg channel.Message) str
 
 func (c *Controller) showMainMenu(userID string) string {
 	c.setState(userID, MenuMain)
-	return `欢迎使用 LinkCode！请选择操作：
+	return `欢迎使用 LinkCode！
 
-1. 创建新 Agent  —— 录入企微 Bot 凭证，创建 AI 助手
-2. 查看我的 Agent —— 查看所有 Agent 的运行状态、Bot 和工作目录
-3. 设定默认工作目录 —— 设置新建 Agent 时默认使用的本地文件夹路径
+1. 创建新 Agent
+   录入企微 Bot 凭证，创建 AI 助手
 
-请回复数字 1-3
-💡 在每个 Agent 的对话中发送 /help 查看 Agent 内可用命令。`
+2. 查看我的 Agent
+   运行状态、Bot、工作目录
+
+3. 设定默认工作目录
+   新建 Agent 时默认使用的本地路径
+
+回复 1-3`
 }
 
 func (c *Controller) handleHelp() string {
