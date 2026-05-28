@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,28 +45,26 @@ type Router struct {
 	agentRunner agent.Runner
 	gw          *gateway.Gateway
 	statusMgr   *StatusManager
-	workDir     string
 
 	mu                  sync.Mutex
-	pendingQuestions    map[int64]*agent.Question // sessionID -> pending question
-	interruptedSessions map[int64]bool            // sessionID -> process was /stop'd
+	pendingQuestions    map[int64]*agent.Question   // sessionID -> pending question
+	interruptedSessions map[int64]bool              // sessionID -> process was /stop'd
 	pendingMessages     map[int64][]channel.Message // sessionID -> queued messages while process is busy
 	thinkingStartedAt   map[int64]time.Time         // sessionID -> when the current thinking started
 }
 
 // New creates a new Router.
-func New(sessMgr *session.Manager, pool *botpool.Pool, runner agent.Runner, gw *gateway.Gateway, statusMgr *StatusManager, workDir string) *Router {
+func New(sessMgr *session.Manager, pool *botpool.Pool, runner agent.Runner, gw *gateway.Gateway, statusMgr *StatusManager) *Router {
 	return &Router{
 		sessionMgr:         sessMgr,
 		botPool:            pool,
 		agentRunner:        runner,
 		gw:                 gw,
 		statusMgr:          statusMgr,
-		workDir:            workDir,
-		pendingQuestions:   make(map[int64]*agent.Question),
-		interruptedSessions: make(map[int64]bool),
-		pendingMessages:     make(map[int64][]channel.Message),
-		thinkingStartedAt:   make(map[int64]time.Time),
+		pendingQuestions:     make(map[int64]*agent.Question),
+		interruptedSessions:  make(map[int64]bool),
+		pendingMessages:      make(map[int64][]channel.Message),
+		thinkingStartedAt:    make(map[int64]time.Time),
 	}
 }
 
@@ -86,12 +83,16 @@ func (r *Router) HandleWorkerEvent(msg channel.Message) {
 	if !ok {
 		return
 	}
-	wd := r.workDir
-	if wd == "" {
-		wd, _ = os.Getwd()
+
+	bot, _ := r.botPool.GetByID(sess.BoundBotID)
+	botWD := ""
+	if bot != nil {
+		botWD = bot.WorkDir
 	}
+	wd, _ := r.botPool.ResolveWorkDir(botWD)
+
 	ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
-		Text: fmt.Sprintf("你好，我是你的 %s「%s」\n工作目录：%s\n有什么任务要交给我吗？", sess.AgentType, sess.Name, wd),
+		Text: fmt.Sprintf("你好，我是你的 %s「%s」\n工作目录：%s\n有什么任务要交给我吗？\n发送 /help 查看可用命令。", displayAgentType(sess.AgentType), sess.Name, wd),
 	})
 }
 
@@ -289,9 +290,17 @@ func (r *Router) sendStreamReply(msg channel.Message, text string, streamID stri
 	return true
 }
 
+func displayAgentType(t string) string {
+	switch t {
+	case "claude-code":
+		return "Claude Code"
+	default:
+		return t
+	}
+}
+
 var subscriptDigits = []rune{'₀', '₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉'}
 
-// subscriptNum converts a non-negative integer to its subscript representation.
 func subscriptNum(n int) string {
 	if n == 0 {
 		return "₀"
@@ -304,7 +313,6 @@ func subscriptNum(n int) string {
 	return string(runes)
 }
 
-// queueIndicator returns a [waiting ₃] suffix when there are pending messages.
 func (r *Router) queueIndicator(sessionID int64) string {
 	r.mu.Lock()
 	n := len(r.pendingMessages[sessionID])
@@ -315,7 +323,6 @@ func (r *Router) queueIndicator(sessionID int64) string {
 	return fmt.Sprintf("  [waiting %s]", subscriptNum(n))
 }
 
-// formatDuration returns a human-readable elapsed time string.
 func formatDuration(d time.Duration) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%d 秒", int(d.Seconds()))

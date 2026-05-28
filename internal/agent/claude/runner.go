@@ -13,17 +13,15 @@ import (
 // Runner manages Claude Code sessions via the CLI.
 type Runner struct {
 	claudePath string
-	workDir    string
 
 	mu       sync.Mutex
 	sessions map[string]*Session // linkCodeSessionID -> running session
 }
 
 // NewRunner creates a new Claude Code runner.
-func NewRunner(claudePath, workDir string) *Runner {
+func NewRunner(claudePath string) *Runner {
 	return &Runner{
 		claudePath: claudePath,
-		workDir:    workDir,
 		sessions:   make(map[string]*Session),
 	}
 }
@@ -33,7 +31,7 @@ func (r *Runner) Name() string { return "claude-code" }
 
 // Start launches a new Claude Code session (no prior session to resume).
 // linkCodeSessionID is the internal LinkCode session identifier used as the key.
-func (r *Runner) Start(ctx context.Context, linkCodeSessionID string) (agent.Session, error) {
+func (r *Runner) Start(ctx context.Context, linkCodeSessionID, workDir string) (agent.Session, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -44,12 +42,13 @@ func (r *Runner) Start(ctx context.Context, linkCodeSessionID string) (agent.Ses
 		delete(r.sessions, linkCodeSessionID)
 	}
 
-	proc, err := procman.Start(ctx, r.claudePath, r.workDir, "")
+	proc, err := procman.Start(ctx, r.claudePath, workDir, "")
 	if err != nil {
 		return nil, fmt.Errorf("claude: start: %w", err)
 	}
 
 	s := &Session{
+		runner:  r,
 		id:      linkCodeSessionID,
 		process: proc,
 	}
@@ -59,7 +58,7 @@ func (r *Runner) Start(ctx context.Context, linkCodeSessionID string) (agent.Ses
 }
 
 // Resume resumes an existing Claude Code session using its Claude session ID.
-func (r *Runner) Resume(ctx context.Context, linkCodeSessionID, claudeSessionID string) (agent.Session, error) {
+func (r *Runner) Resume(ctx context.Context, linkCodeSessionID, claudeSessionID, workDir string) (agent.Session, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -70,12 +69,13 @@ func (r *Runner) Resume(ctx context.Context, linkCodeSessionID, claudeSessionID 
 		delete(r.sessions, linkCodeSessionID)
 	}
 
-	proc, err := procman.Start(ctx, r.claudePath, r.workDir, claudeSessionID)
+	proc, err := procman.Start(ctx, r.claudePath, workDir, claudeSessionID)
 	if err != nil {
 		return nil, fmt.Errorf("claude: resume: %w", err)
 	}
 
 	s := &Session{
+		runner:  r,
 		id:      linkCodeSessionID,
 		process: proc,
 	}
@@ -138,4 +138,3 @@ func (s *Session) IsAlive() bool {
 func (s *Session) ClaudeSessionID() string {
 	return s.process.SessionID()
 }
-
