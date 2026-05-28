@@ -35,8 +35,8 @@ type BotCredential struct {
 type AgentConfig struct {
 	DefaultType    string        `yaml:"default_type"`
 	IdleTimeout    time.Duration `yaml:"idle_timeout"`
-	ClaudeCodePath string        `yaml:"claude_code_path"`
-	ClaudeWorkDir  string        `yaml:"claude_work_dir"`
+	ClaudeCodePath string `yaml:"claude_code_path"`
+	DefaultWorkDir string `yaml:"default_work_dir"`
 }
 
 // AdminConfig holds admin panel settings.
@@ -57,7 +57,7 @@ func DefaultConfig() Config {
 			DefaultType:    "claude-code",
 			IdleTimeout:    30 * time.Minute,
 			ClaudeCodePath: "claude",
-			ClaudeWorkDir:  "",
+			DefaultWorkDir: "",
 		},
 		Admin: AdminConfig{
 			Enabled:  true,

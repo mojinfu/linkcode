@@ -16,21 +16,22 @@ const (
 
 // BotRecord is a row from the bots table.
 type BotRecord struct {
-	ID               int64
-	BotID            string
-	BotName          string
+	ID                 int64
+	BotID              string
+	BotName            string
+	WorkDir            string
 	BotSecretEncrypted []byte
-	Status           BotStatus
-	BoundSessionID   sql.NullInt64
-	CreatedAt        time.Time
-	LastUsedAt       sql.NullTime
+	Status             BotStatus
+	BoundSessionID     sql.NullInt64
+	CreatedAt          time.Time
+	LastUsedAt         sql.NullTime
 }
 
 // InsertBot adds a new bot to the pool.
-func (db *DB) InsertBot(botID, name string, encryptedSecret []byte) (int64, error) {
+func (db *DB) InsertBot(botID, name, workDir string, encryptedSecret []byte) (int64, error) {
 	res, err := db.Exec(
-		`INSERT INTO bots (bot_id, bot_name, bot_secret_encrypted, status) VALUES (?, ?, ?, ?)`,
-		botID, name, encryptedSecret, string(BotIdle),
+		`INSERT INTO bots (bot_id, bot_name, work_dir, bot_secret_encrypted, status) VALUES (?, ?, ?, ?, ?)`,
+		botID, name, workDir, encryptedSecret, string(BotIdle),
 	)
 	if err != nil {
 		return 0, err
@@ -42,9 +43,9 @@ func (db *DB) InsertBot(botID, name string, encryptedSecret []byte) (int64, erro
 func (db *DB) GetBotByBotID(botID string) (*BotRecord, error) {
 	r := &BotRecord{}
 	err := db.QueryRow(
-		`SELECT id, bot_id, bot_name, bot_secret_encrypted, status, bound_session_id, created_at, last_used_at FROM bots WHERE bot_id = ?`,
+		`SELECT id, bot_id, bot_name, COALESCE(work_dir,''), bot_secret_encrypted, status, bound_session_id, created_at, last_used_at FROM bots WHERE bot_id = ?`,
 		botID,
-	).Scan(&r.ID, &r.BotID, &r.BotName, &r.BotSecretEncrypted, &r.Status, &r.BoundSessionID, &r.CreatedAt, &r.LastUsedAt)
+	).Scan(&r.ID, &r.BotID, &r.BotName, &r.WorkDir, &r.BotSecretEncrypted, &r.Status, &r.BoundSessionID, &r.CreatedAt, &r.LastUsedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -55,9 +56,9 @@ func (db *DB) GetBotByBotID(botID string) (*BotRecord, error) {
 func (db *DB) GetBotByID(id int64) (*BotRecord, error) {
 	r := &BotRecord{}
 	err := db.QueryRow(
-		`SELECT id, bot_id, bot_name, bot_secret_encrypted, status, bound_session_id, created_at, last_used_at FROM bots WHERE id = ?`,
+		`SELECT id, bot_id, bot_name, COALESCE(work_dir,''), bot_secret_encrypted, status, bound_session_id, created_at, last_used_at FROM bots WHERE id = ?`,
 		id,
-	).Scan(&r.ID, &r.BotID, &r.BotName, &r.BotSecretEncrypted, &r.Status, &r.BoundSessionID, &r.CreatedAt, &r.LastUsedAt)
+	).Scan(&r.ID, &r.BotID, &r.BotName, &r.WorkDir, &r.BotSecretEncrypted, &r.Status, &r.BoundSessionID, &r.CreatedAt, &r.LastUsedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +68,7 @@ func (db *DB) GetBotByID(id int64) (*BotRecord, error) {
 // ListIdleBots returns all bots that are available for binding.
 func (db *DB) ListIdleBots() ([]BotRecord, error) {
 	rows, err := db.Query(
-		`SELECT id, bot_id, bot_name, bot_secret_encrypted, status, bound_session_id, created_at, last_used_at FROM bots WHERE status = ? ORDER BY last_used_at ASC`,
+		`SELECT id, bot_id, bot_name, COALESCE(work_dir,''), bot_secret_encrypted, status, bound_session_id, created_at, last_used_at FROM bots WHERE status = ? ORDER BY last_used_at ASC`,
 		string(BotIdle),
 	)
 	if err != nil {
@@ -78,7 +79,7 @@ func (db *DB) ListIdleBots() ([]BotRecord, error) {
 	var bots []BotRecord
 	for rows.Next() {
 		var r BotRecord
-		if err := rows.Scan(&r.ID, &r.BotID, &r.BotName, &r.BotSecretEncrypted, &r.Status, &r.BoundSessionID, &r.CreatedAt, &r.LastUsedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.BotID, &r.BotName, &r.WorkDir, &r.BotSecretEncrypted, &r.Status, &r.BoundSessionID, &r.CreatedAt, &r.LastUsedAt); err != nil {
 			return nil, err
 		}
 		bots = append(bots, r)
@@ -89,7 +90,7 @@ func (db *DB) ListIdleBots() ([]BotRecord, error) {
 // ListBots returns all bots regardless of status.
 func (db *DB) ListBots() ([]BotRecord, error) {
 	rows, err := db.Query(
-		`SELECT id, bot_id, bot_name, bot_secret_encrypted, status, bound_session_id, created_at, last_used_at FROM bots ORDER BY created_at DESC`,
+		`SELECT id, bot_id, bot_name, COALESCE(work_dir,''), bot_secret_encrypted, status, bound_session_id, created_at, last_used_at FROM bots ORDER BY created_at DESC`,
 	)
 	if err != nil {
 		return nil, err
@@ -99,7 +100,7 @@ func (db *DB) ListBots() ([]BotRecord, error) {
 	var bots []BotRecord
 	for rows.Next() {
 		var r BotRecord
-		if err := rows.Scan(&r.ID, &r.BotID, &r.BotName, &r.BotSecretEncrypted, &r.Status, &r.BoundSessionID, &r.CreatedAt, &r.LastUsedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.BotID, &r.BotName, &r.WorkDir, &r.BotSecretEncrypted, &r.Status, &r.BoundSessionID, &r.CreatedAt, &r.LastUsedAt); err != nil {
 			return nil, err
 		}
 		bots = append(bots, r)
@@ -136,6 +137,12 @@ func (db *DB) ReleaseBot(botID int64) error {
 		`UPDATE bots SET status = ?, bound_session_id = NULL WHERE id = ?`,
 		string(BotIdle), botID,
 	)
+	return err
+}
+
+// UpdateBotWorkDir sets the work_dir for a bot and returns the old value.
+func (db *DB) UpdateBotWorkDir(botID int64, workDir string) error {
+	_, err := db.Exec(`UPDATE bots SET work_dir = ? WHERE id = ?`, workDir, botID)
 	return err
 }
 

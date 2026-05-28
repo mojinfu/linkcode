@@ -7,43 +7,47 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+
 	"linkcode/internal/crypto"
 	"linkcode/internal/store"
 )
 
 // Bot represents a bot with its decrypted secret.
 type Bot struct {
-	ID     int64
-	BotID  string
-	Name   string
-	Secret string // decrypted
-	Status store.BotStatus
+	ID      int64
+	BotID   string
+	Name    string
+	WorkDir string
+	Secret  string // decrypted
+	Status  store.BotStatus
 }
 
 // Pool manages bot lifecycle.
 type Pool struct {
-	db     *store.DB
-	encKey string
+	db              *store.DB
+	encKey          string
+	configWorkDir   string // fallback from config file
 }
 
 // New creates a new Pool.
-func New(db *store.DB, encKey string) *Pool {
-	return &Pool{db: db, encKey: encKey}
+func New(db *store.DB, encKey, configWorkDir string) *Pool {
+	return &Pool{db: db, encKey: encKey, configWorkDir: configWorkDir}
 }
 
 // Add validates and stores a new bot credential. The secret is encrypted before storage.
-func (p *Pool) Add(botID, name, secret string) (*Bot, error) {
+func (p *Pool) Add(botID, name, workDir, secret string) (*Bot, error) {
 	encrypted, err := crypto.Encrypt(secret, p.encKey)
 	if err != nil {
 		return nil, fmt.Errorf("botpool: encrypt secret: %w", err)
 	}
 
-	id, err := p.db.InsertBot(botID, name, encrypted)
+	id, err := p.db.InsertBot(botID, name, workDir, encrypted)
 	if err != nil {
 		return nil, fmt.Errorf("botpool: insert bot: %w", err)
 	}
 
-	return &Bot{ID: id, BotID: botID, Name: name, Secret: secret, Status: store.BotIdle}, nil
+	return &Bot{ID: id, BotID: botID, Name: name, WorkDir: workDir, Secret: secret, Status: store.BotIdle}, nil
 }
 
 // GetByPlatformBotID looks up a bot by its platform bot_id and returns it with decrypted secret.
@@ -97,20 +101,54 @@ func (p *Pool) List() ([]Bot, error) {
 			secret = "<decrypt error>"
 		}
 		bots = append(bots, Bot{
-			ID:     r.ID,
-			BotID:  r.BotID,
-			Name:   r.BotName,
-			Secret: secret,
-			Status: r.Status,
+			ID:      r.ID,
+			BotID:   r.BotID,
+			Name:    r.BotName,
+			WorkDir: r.WorkDir,
+			Secret:  secret,
+			Status:  r.Status,
 		})
 		_ = err
 	}
 	return bots, nil
 }
 
-// Remove deletes a bot from the pool.
-func (p *Pool) Remove(botInternalID int64) error {
-	return p.db.DeleteBot(botInternalID)
+// UpdateWorkDir sets the working directory for a bot.
+func (p *Pool) UpdateWorkDir(botID int64, workDir string) error {
+	return p.db.UpdateBotWorkDir(botID, workDir)
+}
+
+// DirExists checks whether a directory exists and is accessible.
+func DirExists(path string) bool {
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+// DB exposes the underlying store for settings access.
+func (p *Pool) DB() *store.DB { return p.db }
+
+// ResolveWorkDir resolves the working directory for starting an agent process.
+// Resolution order: botWorkDir → DB setting(default_work_dir) → config fallback → os.Getwd().
+// Returns (resolvedPath, sourceDescription).
+func (p *Pool) ResolveWorkDir(botWorkDir string) (string, string) {
+	if botWorkDir != "" && DirExists(botWorkDir) {
+		return botWorkDir, fmt.Sprintf("Agent 设定 (%s)", botWorkDir)
+	}
+
+	dbSetting, _ := p.db.GetSetting("default_work_dir")
+	if dbSetting != "" && DirExists(dbSetting) {
+		return dbSetting, fmt.Sprintf("全局默认 (%s)", dbSetting)
+	}
+
+	if p.configWorkDir != "" && DirExists(p.configWorkDir) {
+		return p.configWorkDir, fmt.Sprintf("配置文件 (%s)", p.configWorkDir)
+	}
+
+	wd, _ := os.Getwd()
+	return wd, fmt.Sprintf("当前进程目录 (%s)", wd)
 }
 
 func (p *Pool) recordToBot(record *store.BotRecord) (*Bot, error) {
@@ -119,10 +157,11 @@ func (p *Pool) recordToBot(record *store.BotRecord) (*Bot, error) {
 		return nil, fmt.Errorf("botpool: decrypt secret: %w", err)
 	}
 	return &Bot{
-		ID:     record.ID,
-		BotID:  record.BotID,
-		Name:   record.BotName,
-		Secret: secret,
-		Status: record.Status,
+		ID:      record.ID,
+		BotID:   record.BotID,
+		Name:    record.BotName,
+		WorkDir: record.WorkDir,
+		Secret:  secret,
+		Status:  record.Status,
 	}, nil
 }

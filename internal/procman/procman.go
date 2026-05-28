@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -55,7 +56,11 @@ func Start(ctx context.Context, claudePath, workDir, sessionID string) (*Process
 
 	cmd := exec.CommandContext(ctx, claudePath, args...)
 	if workDir != "" {
-		cmd.Dir = workDir
+		if info, err := os.Stat(workDir); err != nil || !info.IsDir() {
+			log.Printf("[procman] workDir %q unavailable (%v), using current directory", workDir, err)
+		} else {
+			cmd.Dir = workDir
+		}
 	}
 
 	log.Printf("[procman] starting: %s %s", claudePath, strings.Join(args, " "))

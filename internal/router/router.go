@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,7 +45,6 @@ type Router struct {
 	agentRunner agent.Runner
 	gw          *gateway.Gateway
 	statusMgr   *StatusManager
-	workDir     string
 
 	mu                  sync.Mutex
 	pendingQuestions    map[int64]*agent.Question // sessionID -> pending question
@@ -54,14 +52,13 @@ type Router struct {
 }
 
 // New creates a new Router.
-func New(sessMgr *session.Manager, pool *botpool.Pool, runner agent.Runner, gw *gateway.Gateway, statusMgr *StatusManager, workDir string) *Router {
+func New(sessMgr *session.Manager, pool *botpool.Pool, runner agent.Runner, gw *gateway.Gateway, statusMgr *StatusManager) *Router {
 	return &Router{
 		sessionMgr:         sessMgr,
 		botPool:            pool,
 		agentRunner:        runner,
 		gw:                 gw,
 		statusMgr:          statusMgr,
-		workDir:            workDir,
 		pendingQuestions:   make(map[int64]*agent.Question),
 		interruptedSessions: make(map[int64]bool),
 	}
@@ -82,12 +79,16 @@ func (r *Router) HandleWorkerEvent(msg channel.Message) {
 	if !ok {
 		return
 	}
-	wd := r.workDir
-	if wd == "" {
-		wd, _ = os.Getwd()
+
+	bot, _ := r.botPool.GetByID(sess.BoundBotID)
+	botWD := ""
+	if bot != nil {
+		botWD = bot.WorkDir
 	}
+	wd, _ := r.botPool.ResolveWorkDir(botWD)
+
 	ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
-		Text: fmt.Sprintf("你好，我是你的 %s「%s」\n工作目录：%s\n有什么任务要交给我吗？", sess.AgentType, sess.Name, wd),
+		Text: fmt.Sprintf("你好，我是你的 %s「%s」\n工作目录：%s\n有什么任务要交给我吗？\n发送 /help 查看可用命令。", displayAgentType(sess.AgentType), sess.Name, wd),
 	})
 }
 
@@ -283,6 +284,15 @@ func (r *Router) sendStreamReply(msg channel.Message, text string, streamID stri
 		return false
 	}
 	return true
+}
+
+func displayAgentType(t string) string {
+	switch t {
+	case "claude-code":
+		return "Claude Code"
+	default:
+		return t
+	}
 }
 
 func (r *Router) sendReply(msg channel.Message, text string) {

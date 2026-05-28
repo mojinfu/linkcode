@@ -48,12 +48,14 @@ const (
 type Runner interface {
 	// Start creates a new agent session and launches the process.
 	// linkCodeSessionID is the internal LinkCode session identifier.
-	Start(ctx context.Context, linkCodeSessionID string) (Session, error)
+	// workDir is the resolved working directory for the agent process.
+	Start(ctx context.Context, linkCodeSessionID, workDir string) (Session, error)
 
 	// Resume resumes an existing session.
 	// linkCodeSessionID is the internal LinkCode session identifier.
 	// providerSessionID is the agent-provider-specific session ID (e.g. Claude's --session-id).
-	Resume(ctx context.Context, linkCodeSessionID, providerSessionID string) (Session, error)
+	// workDir is the resolved working directory for the agent process.
+	Resume(ctx context.Context, linkCodeSessionID, providerSessionID, workDir string) (Session, error)
 
 	// Interrupt stops the active process for the given LinkCode session.
 	// Returns true if a process was running and has been stopped.

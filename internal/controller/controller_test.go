@@ -25,11 +25,11 @@ func TestHandleMessage_Start(t *testing.T) {
 	if !strings.Contains(reply, "欢迎使用 LinkCode") {
 		t.Errorf("expected welcome message, got: %s", reply)
 	}
-	if !strings.Contains(reply, "1. 添加新 Bot") {
+	if !strings.Contains(reply, "1. 创建新 Agent") {
 		t.Errorf("expected menu option 1, got: %s", reply)
 	}
-	if !strings.Contains(reply, "4. 结束 Agent") {
-		t.Errorf("expected menu option 4, got: %s", reply)
+	if !strings.Contains(reply, "3. 设定默认工作目录") {
+		t.Errorf("expected menu option 3, got: %s", reply)
 	}
 
 	t.Logf("Reply:\n%s", reply)
@@ -50,20 +50,72 @@ func TestHandleMessage_MenuNavigations(t *testing.T) {
 		t.Fatal("/start should show menu")
 	}
 
-	// Option 1 → addbot instructions
+	// Option 1 → create agent flow (step 1: name)
 	msg.Content = "1"
 	reply = ctrl.HandleMessage(ctx, msg)
-	if !strings.Contains(reply, "/addbot") {
-		t.Errorf("option 1: expected addbot instructions, got: %s", reply)
+	if !strings.Contains(reply, "请输入 Agent 名称") {
+		t.Errorf("option 1: expected enter agent name, got: %s", reply)
 	}
+
+	// Cancel out
+	msg.Content = "0"
+	ctrl.HandleMessage(ctx, msg)
 
 	// Invalid option
 	msg.Content = "/start"
 	ctrl.HandleMessage(ctx, msg)
 	msg.Content = "99"
 	reply = ctrl.HandleMessage(ctx, msg)
-	if !strings.Contains(reply, "请回复数字 1-4") {
-		t.Errorf("invalid option: expected prompt for 1-4, got: %s", reply)
+	if !strings.Contains(reply, "请回复数字 1-3") {
+		t.Errorf("invalid option: expected prompt for 1-3, got: %s", reply)
+	}
+}
+
+func TestHandleMessage_CreateAgentFlowCancel(t *testing.T) {
+	ctrl := &Controller{
+		userStates: make(map[string]*userState),
+	}
+
+	ctx := context.Background()
+	uid := "user-create"
+
+	// /start → menu
+	msg := channel.Message{UserID: uid, Content: "/start", MsgType: channel.MsgTypeText}
+	ctrl.HandleMessage(ctx, msg)
+
+	// Option 1 → enter agent name
+	msg.Content = "1"
+	reply := ctrl.HandleMessage(ctx, msg)
+	if !strings.Contains(reply, "请输入 Agent 名称") {
+		t.Fatal("expected name prompt")
+	}
+
+	// Enter name → should move to BotID step
+	msg.Content = "测试Agent"
+	reply = ctrl.HandleMessage(ctx, msg)
+	if !strings.Contains(reply, "请输入企微 BotID") {
+		t.Fatalf("expected BotID prompt, got: %s", reply)
+	}
+
+	// Enter BotID → should move to Secret step
+	msg.Content = "test-bot-id-123"
+	reply = ctrl.HandleMessage(ctx, msg)
+	if !strings.Contains(reply, "请输入 Bot Secret") {
+		t.Fatalf("expected Secret prompt, got: %s", reply)
+	}
+
+	// Enter Secret → should move to type selection
+	msg.Content = "test-secret-456"
+	reply = ctrl.HandleMessage(ctx, msg)
+	if !strings.Contains(reply, "请选择 Agent 类型") {
+		t.Fatalf("expected type prompt, got: %s", reply)
+	}
+
+	// Cancel at type step
+	msg.Content = "0"
+	reply = ctrl.HandleMessage(ctx, msg)
+	if !strings.Contains(reply, "欢迎使用 LinkCode") {
+		t.Errorf("cancel should return to main menu, got: %s", reply)
 	}
 }
 
@@ -76,10 +128,10 @@ func TestHandleMessage_DirectAddbotFormatError(t *testing.T) {
 	msg := channel.Message{UserID: "u", Content: "/addbot", MsgType: channel.MsgTypeText}
 
 	reply := ctrl.HandleMessage(ctx, msg)
-	if !strings.Contains(reply, "格式错误") {
+	if !strings.Contains(reply, "参数不足") {
 		t.Errorf("expected format error, got: %s", reply)
 	}
-	t.Logf("/addbot (bad format): %s", reply)
+	t.Logf("/addbot (missing params): %s", reply)
 }
 
 func TestHandleMessage_QuoteMainMenu(t *testing.T) {
@@ -90,16 +142,16 @@ func TestHandleMessage_QuoteMainMenu(t *testing.T) {
 	ctx := context.Background()
 	uid := "user-quote-1"
 
-	// Quote main menu text + reply "1" → should show addbot instructions.
+	// Quote main menu text + reply "1" → should enter create agent flow.
 	msg := channel.Message{
 		UserID:       uid,
 		Content:      "1",
 		MsgType:      channel.MsgTypeText,
-		QuoteContent: "欢迎使用 LinkCode！请选择操作：\n1. 添加新 Bot",
+		QuoteContent: "欢迎使用 LinkCode！请选择操作：\n1. 创建新 Agent",
 	}
 	reply := ctrl.HandleMessage(ctx, msg)
-	if !strings.Contains(reply, "/addbot") {
-		t.Errorf("quoting main menu + '1': expected addbot instructions, got: %s", reply)
+	if !strings.Contains(reply, "请输入 Agent 名称") {
+		t.Errorf("quoting main menu + '1': expected create agent flow, got: %s", reply)
 	}
 }
 
@@ -132,25 +184,15 @@ func TestHandleMessage_NoQuoteStillWorks(t *testing.T) {
 	ctx := context.Background()
 	uid := "user-noquote"
 
-	// /start then "1" without quote → should show addbot instructions.
+	// /start then "1" without quote → should enter create agent flow.
 	msg := channel.Message{UserID: uid, Content: "/start", MsgType: channel.MsgTypeText}
 	ctrl.HandleMessage(ctx, msg)
 
 	msg = channel.Message{UserID: uid, Content: "1", MsgType: channel.MsgTypeText}
 	reply := ctrl.HandleMessage(ctx, msg)
-	if !strings.Contains(reply, "/addbot") {
-		t.Errorf("no quote + '1': expected addbot instructions, got: %s", reply)
+	if !strings.Contains(reply, "请输入 Agent 名称") {
+		t.Errorf("no quote + '1': expected create agent flow, got: %s", reply)
 	}
-}
-
-func TestHandleMessage_QuoteEndAgentMenu(t *testing.T) {
-	// Verify that quoting the end-agent menu text is recognized as MenuEndAgentConfirm.
-	quotedText := "请选择要结束的 Agent（回复数字）：\n1. 日志分析员 (claude-code) - 运行中"
-	state := detectMenuStage(quotedText)
-	if state != MenuEndAgentConfirm {
-		t.Errorf("quoting end-agent menu: expected MenuEndAgentConfirm, got %v", state)
-	}
-	t.Logf("end menu quote detection: state=%v", state)
 }
 
 func TestDetectMenuStage_AllMenus(t *testing.T) {
@@ -158,9 +200,12 @@ func TestDetectMenuStage_AllMenus(t *testing.T) {
 		quotedText string
 		want       MenuState
 	}{
-		{"欢迎使用 LinkCode！请选择操作：\n1. 添加新 Bot", MenuMain},
-		{"请选择 Agent 类型：\n1. Claude Code", MenuAddBotAgentType},
-		{"请选择要结束的 Agent（回复数字）：\n1. test", MenuEndAgentConfirm},
+		{"欢迎使用 LinkCode！请选择操作：\n1. 创建新 Agent", MenuMain},
+		{"请输入 Agent 名称：", MenuCreateAgentName},
+		{"请输入企微 BotID：", MenuCreateAgentBotID},
+		{"请输入 Bot Secret：", MenuCreateAgentSecret},
+		{"请选择 Agent 类型：\n1. Claude Code", MenuCreateAgentType},
+		{"设定 Agent 默认工作目录\n当前：/some/path", MenuSetDefaultWorkDir},
 		{"随机消息", MenuNone},
 		{"", MenuNone},
 	}

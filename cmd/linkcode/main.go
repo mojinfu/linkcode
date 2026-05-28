@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"linkcode/configs"
@@ -117,17 +118,31 @@ func main() {
 	// Run migrations.
 	migrationSQL, err := os.ReadFile("migrations/001_init.sql")
 	if err != nil {
-		log.Fatalf("read migration: %v", err)
+		log.Fatalf("read migration 001: %v", err)
 	}
 	if err := db.RunMigrations(string(migrationSQL)); err != nil {
-		log.Fatalf("run migrations: %v", err)
+		log.Fatalf("run migration 001: %v", err)
+	}
+	migrationV2, err := os.ReadFile("migrations/002_work_dir.sql")
+	if err != nil {
+		log.Fatalf("read migration 002: %v", err)
+	}
+	if err := db.RunMigrations(string(migrationV2)); err != nil {
+		log.Fatalf("run migration 002: %v", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE bots ADD COLUMN work_dir VARCHAR(1024) DEFAULT '' AFTER bot_name`); err != nil {
+		if strings.Contains(err.Error(), "Duplicate column") {
+			log.Printf("migration note: work_dir column already exists, skipped")
+		} else {
+			log.Fatalf("add work_dir column: %v", err)
+		}
 	}
 	log.Println("migrations applied")
 
 	// Initialize layers.
-	botPool := botpool.New(db, cfg.EncryptKey)
+	botPool := botpool.New(db, cfg.EncryptKey, cfg.Agent.DefaultWorkDir)
 	sessionMgr := session.New(db)
-	agentRunner := claude.NewRunner(cfg.Agent.ClaudeCodePath, cfg.Agent.ClaudeWorkDir)
+	agentRunner := claude.NewRunner(cfg.Agent.ClaudeCodePath)
 
 	// Create control bot channel.
 	ctrlChan := wecom.New(cfg.ControlBot.BotID, cfg.ControlBot.Secret)
@@ -137,8 +152,8 @@ func main() {
 
 	// Initialize controller and router.
 	statusMgr := router.NewStatusManager(gw, sessionMgr)
-	ctrl := controller.New(sessionMgr, botPool, agentRunner, gw, cfg.Agent.ClaudeWorkDir)
-	rtr := router.New(sessionMgr, botPool, agentRunner, gw, statusMgr, cfg.Agent.ClaudeWorkDir)
+	ctrl := controller.New(sessionMgr, botPool, gw)
+	rtr := router.New(sessionMgr, botPool, agentRunner, gw, statusMgr)
 
 	// Wire worker bot handlers globally via gateway.
 	gw.SetWorkerMessageHandler(func(msg channel.Message) {
