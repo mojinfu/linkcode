@@ -2,7 +2,13 @@
 // Each agent type (Claude Code, Kimi Code, etc.) implements this interface.
 package agent
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrBusy is returned by Resume or Start when the previous process is still running.
+var ErrBusy = errors.New("agent: previous process still running")
 
 // OutputChunk represents a piece of streaming output from an agent.
 type OutputChunk struct {
