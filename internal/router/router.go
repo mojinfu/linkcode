@@ -51,6 +51,8 @@ type Router struct {
 	mu                  sync.Mutex
 	pendingQuestions    map[int64]*agent.Question // sessionID -> pending question
 	interruptedSessions map[int64]bool            // sessionID -> process was /stop'd
+	pendingMessages     map[int64][]channel.Message // sessionID -> queued messages while process is busy
+	thinkingStartedAt   map[int64]time.Time         // sessionID -> when the current thinking started
 }
 
 // New creates a new Router.
@@ -64,6 +66,8 @@ func New(sessMgr *session.Manager, pool *botpool.Pool, runner agent.Runner, gw *
 		workDir:            workDir,
 		pendingQuestions:   make(map[int64]*agent.Question),
 		interruptedSessions: make(map[int64]bool),
+		pendingMessages:     make(map[int64][]channel.Message),
+		thinkingStartedAt:   make(map[int64]time.Time),
 	}
 }
 
@@ -283,6 +287,45 @@ func (r *Router) sendStreamReply(msg channel.Message, text string, streamID stri
 		return false
 	}
 	return true
+}
+
+var subscriptDigits = []rune{'₀', '₁', '₂', '₃', '₄', '₅', '₆', '₇', '₈', '₉'}
+
+// subscriptNum converts a non-negative integer to its subscript representation.
+func subscriptNum(n int) string {
+	if n == 0 {
+		return "₀"
+	}
+	var runes []rune
+	for n > 0 {
+		runes = append([]rune{subscriptDigits[n%10]}, runes...)
+		n /= 10
+	}
+	return string(runes)
+}
+
+// queueIndicator returns a [waiting ₃] suffix when there are pending messages.
+func (r *Router) queueIndicator(sessionID int64) string {
+	r.mu.Lock()
+	n := len(r.pendingMessages[sessionID])
+	r.mu.Unlock()
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf("  [waiting %s]", subscriptNum(n))
+}
+
+// formatDuration returns a human-readable elapsed time string.
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%d 秒", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%d 分 %d 秒", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	return fmt.Sprintf("%d 小时 %d 分", h, m)
 }
 
 func (r *Router) sendReply(msg channel.Message, text string) {
