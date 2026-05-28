@@ -273,19 +273,23 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 	var cache streamCache
 	streamBroken := false
 
-	// Build status bar helper.
+	streamTimeout := time.Duration(0)
+	if ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID); ok {
+		streamTimeout = ch.StreamTimeout()
+	}
+
 	buildStatusBar := func() string {
-		timeStr, warning := r.streamStatus(sess.ID)
+		timeStr, warning := r.streamStatus(sess.ID, streamTimeout)
 	title := spinPrefix(spinnerRunes, spinnerIconIdx, spinnerDotIdx, "") + timeStr + " " + spinDots(spinnerDotIdx) + r.queueIndicator(sess.ID)
 	if warning != "" {
 		return r.styler.Box(title, warning)
 	}
-	return r.styler.Bar(title)
+	return r.styler.Bar(title) + r.styler.DiffSuffix(spinnerDotIdx)
 	}
 
 	// Send initial spinner frame.
 	spinnerDotIdx++
-	if !r.sendStreamReply(msg, buildStatusBar()+"\n", streamID, false) {
+	if !r.sendStreamReply(msg, buildStatusBar(), streamID, false) {
 		streamBroken = true
 	}
 
@@ -305,7 +309,7 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 				return
 			case agent.KindText:
 				cache.textBuf.WriteString(chunk.Content)
-				if !r.sendStreamReply(msg, buildStatusBar()+cache.textBuf.String(), streamID, false) {
+				if !r.sendStreamReply(msg, buildStatusBar()+"\n"+cache.textBuf.String(), streamID, false) {
 					streamBroken = true
 				}
 				spinnerInterval = spinnerMinInterval
@@ -328,7 +332,7 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 			spinnerDotIdx++
 			frameText := buildStatusBar()
 			if cache.textBuf.Len() > 0 {
-				frameText += cache.textBuf.String()
+				frameText += "\n" + cache.textBuf.String()
 			}
 			if spinnerInterval < spinnerMaxInterval {
 				spinnerInterval += spinnerDecelStep
@@ -351,7 +355,7 @@ done:
 	delete(r.interruptedSessions, sess.ID)
 	r.mu.Unlock()
 	if interrupted {
-		stopText := fmt.Sprintf("[✗] %s interrupted, stand by", sess.Name)
+		stopText := r.styler.Bar("[✗] interrupted, stand by")
 		if !r.sendStreamReply(msg, stopText, streamID, true) {
 			r.sendReply(msg, stopText)
 		}
@@ -367,7 +371,7 @@ done:
 		if responseText != "" {
 			ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
 			if ok && ch.IsConnected() {
-				prefix := buildQuotePrefix(msg.Content, 30)
+				prefix := quotePrefix(r.styler, msg.Content, 30)
 				doneText := r.styler.Bar("[✓] stand by") + "\n\n" + prefix + "\n" + responseText
 				ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
 					Text:   doneText,

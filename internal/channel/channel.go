@@ -84,4 +84,8 @@ type Channel interface {
 	// OnConnectionChange registers a callback that fires when the WebSocket
 	// connects (after initial auth or reconnection) or disconnects.
 	OnConnectionChange(handler func(connected bool))
+
+	// StreamTimeout returns the platform's hard limit on stream reply duration.
+	// Returns 0 if the platform has no limit.
+	StreamTimeout() time.Duration
 }

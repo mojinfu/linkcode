@@ -90,6 +90,9 @@ func New(botID, secret string) *Channel {
 // BotID returns the bot identifier.
 func (c *Channel) BotID() string { return c.botID }
 
+// StreamTimeout returns the WeCom hard limit on stream reply duration.
+func (c *Channel) StreamTimeout() time.Duration { return streamTimeout }
+
 // IsConnected returns whether the WebSocket is currently active.
 func (c *Channel) IsConnected() bool {
 	c.connMu.Lock()

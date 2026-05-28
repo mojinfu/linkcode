@@ -255,15 +255,13 @@ func (r *Router) sendQuestionMenu(msg channel.Message, q *agent.Question) {
 	}
 }
 
-// buildQuotePrefix formats the first n characters of the user's original message
-// as a markdown blockquote prefix, so the fallback proactive message gives context
-// about which user message it is responding to.
-func buildQuotePrefix(userMsg string, n int) string {
-	runes := []rune(userMsg)
+// quotePrefix truncates text to n runes and wraps it in platform-specific quote markup.
+func quotePrefix(styler channel.Styler, text string, n int) string {
+	runes := []rune(text)
 	if len(runes) > n {
-		return fmt.Sprintf("> %s...\n\n", string(runes[:n]))
+		return styler.Quote(string(runes[:n]) + "...") + "\n"
 	}
-	return fmt.Sprintf("> %s\n\n", userMsg)
+	return styler.Quote(text) + "\n"
 }
 
 // spinPrefix builds the stream prefix for the current spinner frame.
@@ -332,26 +330,23 @@ func (r *Router) queueIndicator(sessionID int64) string {
 	return fmt.Sprintf("  [waiting %s]", subscriptNum(n))
 }
 
-const streamHardLimit = 6 * time.Minute
-const streamWarnAt = 5*time.Minute + 30*time.Second
-
 // streamStatus returns the elapsed time string (for the Bar title) and an optional
 // timeout warning (which goes into the Box body to keep the title short).
-func (r *Router) streamStatus(sessionID int64) (timeStr string, warning string) {
+func (r *Router) streamStatus(sessionID int64, streamTimeout time.Duration) (timeStr string, warning string) {
 	r.mu.Lock()
 	startedAt, ok := r.thinkingStartedAt[sessionID]
 	r.mu.Unlock()
-	if !ok {
+	if !ok || streamTimeout <= 0 {
 		return "", ""
 	}
 	elapsed := time.Since(startedAt)
 	timeStr = fmt.Sprintf("（%s）", formatDurationShort(elapsed))
-	if elapsed > streamWarnAt {
-		remaining := streamHardLimit - elapsed
+	if elapsed > streamTimeout-30*time.Second {
+		remaining := streamTimeout - elapsed
 		if remaining < 0 {
 			remaining = 0
 		}
-		warning = fmt.Sprintf("⚡ stream %s 后断联，Agent 继续后台运行", formatDuration(remaining))
+		warning = r.styler.StreamWarning(remaining)
 	}
 	return
 }
