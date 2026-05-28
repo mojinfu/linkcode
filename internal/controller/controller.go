@@ -1,4 +1,4 @@
-// Package controller implements the main control bot's menu-based interaction logic.
+﻿// Package controller implements the main control bot's menu-based interaction logic.
 package controller
 
 import (
@@ -41,17 +41,19 @@ type Controller struct {
 	sessionMgr *session.Manager
 	botPool    *botpool.Pool
 	gw         *gateway.Gateway
+	styler     channel.Styler
 
 	mu         sync.Mutex
 	userStates map[string]*userState
 }
 
 // New creates a new Controller.
-func New(sessMgr *session.Manager, pool *botpool.Pool, gw *gateway.Gateway) *Controller {
+func New(sessMgr *session.Manager, pool *botpool.Pool, gw *gateway.Gateway, styler channel.Styler) *Controller {
 	return &Controller{
 		sessionMgr: sessMgr,
 		botPool:    pool,
 		gw:         gw,
+		styler:     styler,
 		userStates: make(map[string]*userState),
 	}
 }
@@ -100,33 +102,20 @@ func (c *Controller) HandleMessage(ctx context.Context, msg channel.Message) str
 
 func (c *Controller) showMainMenu(userID string) string {
 	c.setState(userID, MenuMain)
-	return `欢迎使用 LinkCode！
-
-1. 创建新 Agent
-   录入企微 Bot 凭证，创建 AI 助手
-
-2. 查看我的 Agent
-   运行状态、Bot、工作目录
-
-3. 设定默认工作目录
-   新建 Agent 时默认使用的本地路径
-
-回复 1-3`
+	return c.styler.Box("菜单",
+		"\"1. 创建 Agent\"   —  录入 Bot 凭证\n"+
+			"\"2. 查看 Agent\"   —  运行状态与工作目录\n"+
+			"\"3. 默认工作目录\" —  新建时使用此路径\n"+
+			"\n回复 1-3")
 }
 
 func (c *Controller) handleHelp() string {
-	return `总控 Bot 可用命令：
-
-/start   — 显示主菜单，从这里开始所有操作
-/addbot  — 快速创建 Agent，用法：/addbot <名称> <BotID> <Secret>
-           <名称>  给 Agent 起个名字，如「助手A」
-           <BotID> 企微 AI 机器人的 BotID（在管理后台 → 应用管理 → AI 机器人 → 详情页）
-           <Secret> 同一页面的 Secret，点击「查看 Secret」获取
-/list    — 查看你名下所有 Agent 及各自的状态和工作目录
-/help    — 显示本帮助
-
-💡 推荐通过主菜单分步骤创建 Agent，更友好。
-💡 在每个 Agent 对话中发送 /new 可重置对话。`
+	return c.styler.Box("总控命令",
+		"\"/start\"   显示主菜单\n"+
+			"\"/addbot\"  快速创建 Agent：/addbot 名称 BotID Secret\n"+
+			"\"/list\"    查看所有 Agent 的状态与工作目录\n"+
+			"\"/help\"    显示本帮助\n"+
+			"\n推荐通过主菜单分步创建 Agent")
 }
 
 func (c *Controller) handleMainMenuChoice(userID, text string) string {
@@ -138,7 +127,7 @@ func (c *Controller) handleMainMenuChoice(userID, text string) string {
 	case "3":
 		return c.enterSetDefaultWorkDir(userID)
 	default:
-		return "请回复数字 1-3，或发送 /start 重新开始\n💡 试试引用本条消息后回复数字"
+		return c.styler.Box("菜单", "请回复数字 1-3，或发送 /start 重新开始\n\n💡 试试引用本条消息后回复数字")
 	}
 }
 
@@ -148,7 +137,7 @@ func (c *Controller) handleMainMenuChoice(userID, text string) string {
 
 func (c *Controller) enterCreateAgentName(userID string) string {
 	c.setState(userID, MenuCreateAgentName)
-	return "创建新 Agent\n\n请输入 Agent 名称：\n\n（回复 0 取消）"
+	return c.styler.Box("创建 Agent", "请输入 Agent 名称：\n\n（回复 0 取消）")
 }
 
 func (c *Controller) handleCreateAgentName(userID, text string) string {
@@ -158,14 +147,14 @@ func (c *Controller) handleCreateAgentName(userID, text string) string {
 	}
 	name := text
 	if name == "" {
-		return "名称不能为空，请重新输入：\n（回复 0 取消）"
+		return c.styler.Box("创建 Agent", "名称不能为空，请重新输入：\n\n（回复 0 取消）")
 	}
 
 	st := c.getState(userID)
 	st.tmpAgentName = name
 	c.setState(userID, MenuCreateAgentBotID)
 
-	return fmt.Sprintf("Agent 名称：「%s」\n\n请输入企微 BotID：\n\n💡 BotID 在企业微信管理后台 → 应用管理 → AI 机器人 → 详情页 可找到\n（回复 0 取消）", name)
+	return c.styler.Box("创建 Agent", fmt.Sprintf("\"Agent 名称：「%s」\n\n请输入企微 BotID：\n\n💡 企业微信管理后台 → 应用管理 → AI 机器人 → 详情页\n（回复 0 取消）", name))
 }
 
 func (c *Controller) handleCreateAgentBotID(userID, text string) string {
@@ -175,7 +164,7 @@ func (c *Controller) handleCreateAgentBotID(userID, text string) string {
 	}
 	botID := text
 	if botID == "" {
-		return "BotID 不能为空，请重新输入：\n（回复 0 取消）"
+		return c.styler.Box("创建 Agent", "BotID 不能为空，请重新输入：\n\n（回复 0 取消）")
 	}
 
 	st := c.getState(userID)
@@ -185,7 +174,7 @@ func (c *Controller) handleCreateAgentBotID(userID, text string) string {
 	st.tmpBotID = botID
 	c.setState(userID, MenuCreateAgentSecret)
 
-	return fmt.Sprintf("Agent 名称：「%s」\nBotID：%s\n\n请输入 Bot Secret：\n\n💡 与 BotID 在同一页面，点击「查看 Secret」获取\n（回复 0 取消）", st.tmpAgentName, botID)
+	return c.styler.Box("创建 Agent", fmt.Sprintf("\"Agent 名称：「%s」\nBotID：%s\n\n请输入 Bot Secret：\n\n💡 与 BotID 在同一页面，点击「查看 Secret」获取\n（回复 0 取消）", st.tmpAgentName, botID))
 }
 
 func (c *Controller) handleCreateAgentSecret(userID, text string) string {
@@ -195,7 +184,7 @@ func (c *Controller) handleCreateAgentSecret(userID, text string) string {
 	}
 	secret := text
 	if secret == "" {
-		return "Secret 不能为空，请重新输入：\n（回复 0 取消）"
+		return c.styler.Box("创建 Agent", "Secret 不能为空，请重新输入：\n\n（回复 0 取消）")
 	}
 
 	st := c.getState(userID)
@@ -205,7 +194,7 @@ func (c *Controller) handleCreateAgentSecret(userID, text string) string {
 	st.tmpSecret = secret
 	c.setState(userID, MenuCreateAgentType)
 
-	return fmt.Sprintf("Agent 名称：「%s」\nBotID：%s\nSecret：已输入\n\n请选择 Agent 类型：\n1. Claude Code\n\n请回复数字 1\n（回复 0 取消）", st.tmpAgentName, st.tmpBotID)
+	return c.styler.Box("创建 Agent", fmt.Sprintf("\"Agent 名称：「%s」\nBotID：%s\nSecret：已输入\n\n请选择 Agent 类型：\n1. Claude Code\n\n请回复数字 1\n（回复 0 取消）", st.tmpAgentName, st.tmpBotID))
 }
 
 func (c *Controller) handleCreateAgentType(ctx context.Context, userID, text string) string {
@@ -219,7 +208,7 @@ func (c *Controller) handleCreateAgentType(ctx context.Context, userID, text str
 	case "1":
 		agentType = "claude-code"
 	default:
-		return "请回复数字 1 选择 Claude Code\n（回复 0 取消）"
+		return c.styler.Box("创建 Agent", "请回复数字 1 选择 Claude Code\n\n（回复 0 取消）")
 	}
 
 	st := c.getState(userID)
@@ -264,21 +253,23 @@ func (c *Controller) handleCreateAgentType(ctx context.Context, userID, text str
 		return "内部错误：找不到 Agent 连接"
 	}
 
-	welcome := fmt.Sprintf("你好，我是你的 %s「%s」\n工作目录：%s\n有什么任务要交给我吗？\n发送 /help 查看可用命令。", agentTypeDisplay(agentType), name, wd)
+	b := c.styler.Bold
+	welcome := fmt.Sprintf("你好，我是你的 %s「%s」\n工作目录：%s\n发送 %s 查看可用命令。",
+		agentTypeDisplay(agentType), name, wd, b("/help"))
 	if err := workerCh.SendMessage(ctx, userID, channel.MessageContent{
 		Text:   welcome,
 		ChatID: userID,
 	}); err != nil {
 		log.Printf("[controller] send welcome via bot %s failed: %v", bot.Name, err)
 		if isFirstContactErr(err) {
-			return fmt.Sprintf("Agent「%s」创建成功！\n\n这是你首次与此 Bot 建立联系，企业微信要求你先主动发起对话。请在企微中搜索「%s」并进入聊天，之后即可正常对话。", name, name)
+			return fmt.Sprintf("Agent「%s」创建成功！\n\n这是你首次与此 Bot 建立联系，企业微信要求你先主动发起对话。请在企微中搜索 %s 并进入聊天，之后即可正常对话。", name, b(name))
 		}
-		return fmt.Sprintf("Agent「%s」已创建，但向你发送消息失败：%v\n请尝试在企业微信中搜索「%s」并进入聊天。", name, err, name)
+		return fmt.Sprintf("Agent「%s」已创建，但向你发送消息失败：%v\n请尝试在企业微信中搜索 %s 并进入聊天。", name, err, b(name))
 	}
 
 	log.Printf("[controller] created agent %s (type: %s, bot: %s, session: %d)", name, agentType, bot.BotID, sess.ID)
 
-	return fmt.Sprintf("Agent「%s」（%s）创建成功！已经在企业微信中给你发了消息，去看看吧。\n\n发送 /start 返回主菜单。", name, agentTypeDisplay(agentType))
+	return fmt.Sprintf("Agent「%s」（%s）创建成功！已经在企业微信中给你发了消息，去看看吧。\n\n发送 /start 返回主菜单。", b(name), agentTypeDisplay(agentType))
 }
 
 // ============================================================================
@@ -324,20 +315,22 @@ func (c *Controller) handleAddBot(userID, text string) string {
 		return "内部错误：找不到 Agent 连接"
 	}
 
-	welcome := fmt.Sprintf("你好，我是你的 %s「%s」\n工作目录：%s\n有什么任务要交给我吗？\n发送 /help 查看可用命令。", agentTypeDisplay(agentType), name, wd)
+	b := c.styler.Bold
+	welcome := fmt.Sprintf("你好，我是你的 %s「%s」\n工作目录：%s\n发送 %s 查看可用命令。",
+		agentTypeDisplay(agentType), name, wd, b("/help"))
 	if err := workerCh.SendMessage(ctx, userID, channel.MessageContent{
 		Text:   welcome,
 		ChatID: userID,
 	}); err != nil {
 		log.Printf("[controller] send welcome via bot %s failed: %v", bot.Name, err)
 		if isFirstContactErr(err) {
-			return fmt.Sprintf("Agent「%s」（%s）创建成功！\n\n这是你首次与此 Bot 建立联系，企业微信要求你先主动发起对话。请在企微中搜索「%s」并进入聊天，之后即可正常对话。", name, agentTypeDisplay(agentType), name)
+			return fmt.Sprintf("Agent「%s」（%s）创建成功！\n\n这是你首次与此 Bot 建立联系，企业微信要求你先主动发起对话。请在企微中搜索 %s 并进入聊天，之后即可正常对话。", name, agentTypeDisplay(agentType), b(name))
 		}
 		return fmt.Sprintf("Agent「%s」已创建，但向你发送消息失败：%v", name, err)
 	}
 
 	log.Printf("[controller] /addbot: created agent %s (type: %s, bot: %s, session: %d)", name, agentType, bot.BotID, sess.ID)
-	return fmt.Sprintf("Agent「%s」（%s）创建成功！已经在企业微信中给你发了消息。", name, agentTypeDisplay(agentType))
+	return fmt.Sprintf("Agent「%s」（%s）创建成功！已经在企业微信中给你发了消息。", b(name), agentTypeDisplay(agentType))
 }
 
 // ============================================================================
@@ -385,9 +378,7 @@ func (c *Controller) handleList(userID string) string {
 		sb.WriteString(fmt.Sprintf("   Bot：%s\n", botName))
 		sb.WriteString(fmt.Sprintf("   工作目录：%s（%s）\n\n", wd, source))
 	}
-	sb.WriteString("发送 /start 返回主菜单。")
-
-	return sb.String()
+	return c.styler.Box("Agent 列表", sb.String())
 }
 
 // isFirstContactErr checks if the error is the WeCom "never contacted" limit (846607).
@@ -416,7 +407,7 @@ func (c *Controller) enterSetDefaultWorkDir(userID string) string {
 		current = "（未设置，使用配置文件或进程目录）"
 	}
 
-	return fmt.Sprintf("设定 Agent 默认工作目录\n当前：%s\n\n请输入新路径（必须是存在的目录）：\n（回复 0 返回菜单）", current)
+	return c.styler.Box("默认工作目录", fmt.Sprintf("当前：%s\n\n请输入新路径（必须是存在的目录）：\n（回复 0 返回菜单）", current))
 }
 
 func (c *Controller) handleSetDefaultWorkDir(userID, text string) string {
@@ -426,7 +417,7 @@ func (c *Controller) handleSetDefaultWorkDir(userID, text string) string {
 	}
 
 	if !botpool.DirExists(text) {
-		return fmt.Sprintf("目录不存在或无法访问：%s\n\n请检查路径后重试。\n回复 0 返回菜单。", text)
+		return c.styler.Box("默认工作目录", fmt.Sprintf("目录不存在或无法访问：%s\n\n请检查路径后重试。\n回复 0 返回菜单。", text))
 	}
 
 	if err := c.botPool.DB().SetSetting("default_work_dir", text); err != nil {
@@ -434,7 +425,7 @@ func (c *Controller) handleSetDefaultWorkDir(userID, text string) string {
 		return fmt.Sprintf("保存失败：%v\n发送 /start 返回主菜单。", err)
 	}
 
-	return fmt.Sprintf("Agent 默认工作目录已更新：%s\n\n新建的 Agent 将默认使用此目录，已创建的 Agent 不受影响。\n发送 /start 返回主菜单。", text)
+	return c.styler.Box("默认工作目录", fmt.Sprintf("已更新：%s\n\n新建的 Agent 将默认使用此目录，已创建的 Agent 不受影响。\n发送 /start 返回主菜单。", text))
 }
 
 // ============================================================================
@@ -467,7 +458,7 @@ func (c *Controller) setState(userID string, state MenuState) {
 // detectMenuStage inspects quoted text to determine which menu the user is replying to.
 func detectMenuStage(quotedText string) MenuState {
 	switch {
-	case strings.Contains(quotedText, "欢迎使用 LinkCode！请选择操作"):
+	case strings.Contains(quotedText, "\"1. 创建 Agent\""):
 		return MenuMain
 	case strings.Contains(quotedText, "请输入 Agent 名称"):
 		return MenuCreateAgentName

@@ -1,4 +1,4 @@
-// Package wecom implements the channel.Channel interface for 企业微信 AI Bot.
+﻿// Package wecom implements the channel.Channel interface for 企业微信 AI Bot.
 //
 // Protocol reference:
 //
@@ -33,6 +33,11 @@ const (
 	dialTimeout          = 10 * time.Second
 	authTimeout          = 10 * time.Second
 	ackTimeout           = 5 * time.Second
+		// streamTimeout is the hard limit WeCom imposes on a single stream reply.
+		// From the moment the user sends a message, WeCom will keep the stream
+		// alive for at most 6 minutes before forcibly ending it.
+		// Ref: https://developer.work.weixin.qq.com/document/path/100719
+		streamTimeout = 6 * time.Minute
 
 	// readWait is the read deadline for ReadMessage.
 	// If no data (heartbeat response, message, etc.) arrives within this window,
@@ -84,6 +89,9 @@ func New(botID, secret string) *Channel {
 
 // BotID returns the bot identifier.
 func (c *Channel) BotID() string { return c.botID }
+
+// StreamTimeout returns the WeCom hard limit on stream reply duration.
+func (c *Channel) StreamTimeout() time.Duration { return streamTimeout }
 
 // IsConnected returns whether the WebSocket is currently active.
 func (c *Channel) IsConnected() bool {

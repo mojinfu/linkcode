@@ -1,4 +1,4 @@
-package router
+﻿package router
 
 import (
 	"context"
@@ -108,11 +108,12 @@ func (r *Router) handleNew(msg channel.Message, sess *session.Session) {
 
 	var welcome string
 	claudeSid := sess.ClaudeSessionID
+	b := r.styler.Bold
 	if hadClaudeSession {
-		welcome = fmt.Sprintf("对话已重置。\n旧 Claude Session：%s\n新 LinkCode Session：%d（Claude Session 将在下条消息时创建）\n\n工作目录：%s（%s）\n开始新的对话吧！",
-			claudeSid, newSess.ID, wd, source)
+		welcome = fmt.Sprintf("对话已重置。\n旧 Claude Session：%s\n新 LinkCode Session：%s（Claude Session 将在下条消息时创建）\n\n工作目录：%s（%s）\n开始新的对话吧！",
+			b(claudeSid), b(fmt.Sprintf("%d", newSess.ID)), wd, source)
 	} else {
-		welcome = fmt.Sprintf("你好，我是你的 Agent「%s」，有什么任务要交给我吗？\n工作目录：%s（%s）\n发送 /help 查看可用命令。", sess.Name, wd, source)
+		welcome = fmt.Sprintf("你好，我是你的 Agent「%s」，有什么任务要交给我吗？\n工作目录：%s（%s）\n发送 %s 查看可用命令。", sess.Name, wd, source, b("/help"))
 	}
 	r.sendReply(msg, welcome)
 
@@ -130,7 +131,7 @@ func (r *Router) handleResetDefaultWorkDir(msg channel.Message, sess *session.Se
 			botWD = bot.WorkDir
 		}
 		wd, source := r.botPool.ResolveWorkDir(botWD)
-		r.sendReply(msg, fmt.Sprintf("当前 Claude 启动时的默认工作目录：%s（%s）\n\n修改方式：/resetdefaultworkdir <路径>\n修改后 /new 才会生效。", wd, source))
+		r.sendReply(msg, fmt.Sprintf("当前 Claude 启动时的默认工作目录：%s（%s）\n\n修改方式：%s <路径>\n修改后 /new 才会生效。", wd, source, r.styler.Bold("/resetdefaultworkdir")))
 		return
 	}
 
@@ -158,16 +159,13 @@ func (r *Router) handleWorkDir(msg channel.Message, sess *session.Session) {
 
 // handleHelp sends a list of available worker bot commands to the user.
 func (r *Router) handleHelp(msg channel.Message) {
-	help := `可用命令：
-
-/new                 — 重置对话（清空上下文），新的 Claude Session 将在下条消息时创建
-/stop                — 中断 Agent 正在进行的思考
-/workdir             — 查看 Claude 当前实际所在的工作目录（让 Claude 执行 pwd）
-/resetdefaultworkdir — 设定此 Agent 的默认工作目录（Claude 进程启动时的 cmd.Dir）
-                       修改后需要 /new 才会生效，不带参数查看当前值
-/help                — 显示本帮助
-
-直接发送文字消息即可与 Agent 对话。`
+	help := r.styler.Box("Agent 命令",
+		"\"/new\"                 重置对话，清空上下文\n"+
+			"\"/stop\"                中断 Agent 正在进行的思考\n"+
+			"\"/workdir\"             让 Claude 回答当前实际的工作目录\n"+
+			"\"/resetdefaultworkdir\" 设定此 Agent 默认工作目录\n"+
+			"\"/help\"                显示本帮助\n"+
+			"\n直接发文字消息即可与 Agent 对话")
 	r.sendReply(msg, help)
 }
 
@@ -275,10 +273,23 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 	var cache streamCache
 	streamBroken := false
 
+	streamTimeout := time.Duration(0)
+	if ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID); ok {
+		streamTimeout = ch.StreamTimeout()
+	}
+
+	buildStatusBar := func() string {
+		timeStr, warning := r.streamStatus(sess.ID, streamTimeout)
+	title := spinPrefix(spinnerRunes, spinnerIconIdx, spinnerDotIdx, "") + timeStr + " " + spinDots(spinnerDotIdx) + r.queueIndicator(sess.ID)
+	if warning != "" {
+		return r.styler.Box(title, warning)
+	}
+	return r.styler.Bar(title) + r.styler.DiffSuffix(spinnerDotIdx)
+	}
+
 	// Send initial spinner frame.
 	spinnerDotIdx++
-	frame := spinPrefix(spinnerRunes, spinnerIconIdx, spinnerDotIdx, sess.Name) + r.queueIndicator(sess.ID)
-	if !r.sendStreamReply(msg, frame, streamID, false) {
+	if !r.sendStreamReply(msg, buildStatusBar(), streamID, false) {
 		streamBroken = true
 	}
 
@@ -294,11 +305,11 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 			case agent.KindError:
 				log.Printf("[router] agent error: %s", chunk.Content)
 				r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateDizzy})
-				r.sendStreamReply(msg, fmt.Sprintf("[💫] %s error\n\n%s", sess.Name, chunk.Content), streamID, true)
+				r.sendStreamReply(msg, r.styler.Bar("[💫] error")+"\n"+chunk.Content, streamID, true)
 				return
 			case agent.KindText:
 				cache.textBuf.WriteString(chunk.Content)
-				if !r.sendStreamReply(msg, spinPrefix(spinnerRunes, spinnerIconIdx, spinnerDotIdx, sess.Name)+r.queueIndicator(sess.ID)+cache.textBuf.String(), streamID, false) {
+				if !r.sendStreamReply(msg, buildStatusBar()+"\n"+cache.textBuf.String(), streamID, false) {
 					streamBroken = true
 				}
 				spinnerInterval = spinnerMinInterval
@@ -319,9 +330,9 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 			}
 			spinnerIconIdx++
 			spinnerDotIdx++
-			frameText := spinPrefix(spinnerRunes, spinnerIconIdx, spinnerDotIdx, sess.Name) + r.queueIndicator(sess.ID)
+			frameText := buildStatusBar()
 			if cache.textBuf.Len() > 0 {
-				frameText += cache.textBuf.String()
+				frameText += "\n" + cache.textBuf.String()
 			}
 			if spinnerInterval < spinnerMaxInterval {
 				spinnerInterval += spinnerDecelStep
@@ -344,7 +355,7 @@ done:
 	delete(r.interruptedSessions, sess.ID)
 	r.mu.Unlock()
 	if interrupted {
-		stopText := fmt.Sprintf("[✗] %s interrupted, stand by", sess.Name)
+		stopText := r.styler.Bar("[✗] interrupted, stand by")
 		if !r.sendStreamReply(msg, stopText, streamID, true) {
 			r.sendReply(msg, stopText)
 		}
@@ -360,8 +371,8 @@ done:
 		if responseText != "" {
 			ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
 			if ok && ch.IsConnected() {
-				prefix := buildQuotePrefix(msg.Content, 30)
-				doneText := fmt.Sprintf("%s[✓] %s stand by\n\n%s", prefix, sess.Name, responseText)
+				prefix := quotePrefix(r.styler, msg.Content, 30)
+				doneText := r.styler.Bar("[✓] stand by") + "\n\n" + prefix + "\n" + responseText
 				ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
 					Text:   doneText,
 					ChatID: msg.ChatID,
@@ -377,7 +388,7 @@ done:
 			r.sendQuestionMenu(msg, cache.question)
 		}
 	} else {
-		doneText := fmt.Sprintf("[✓] %s stand by\n\n%s", sess.Name, responseText)
+		doneText := r.styler.Bar("[✓] stand by") + "\n\n" + responseText
 		r.sendStreamReply(msg, doneText, streamID, true)
 
 		if cache.question != nil {
@@ -428,10 +439,12 @@ func (r *Router) enqueueMessage(sess *session.Session, msg channel.Message) {
 	if ok {
 		elapsed = time.Since(startedAt)
 	}
-	r.sendReply(msg, fmt.Sprintf(
-		"正在思考中（已过 %s），你的消息已排队（队列 %d 条）。回复 /stop 中断当前任务，或等待思考完成后逐一处理。",
-		formatDuration(elapsed), queued,
-	))
+	r.sendReply(msg, r.styler.Box("排队中",
+		fmt.Sprintf("Agent 正在思考（已过 %s）\n"+
+			"排队消息：%d 条\n"+
+			"\n回复 \"/stop\" 中断当前任务\n"+
+			"或等待思考完成后逐一处理",
+			formatDuration(elapsed), queued)))
 }
 
 // drainPendingMessages processes queued messages one by one after the current

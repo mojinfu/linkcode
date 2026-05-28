@@ -5,6 +5,7 @@ import (
 
 	"linkcode/internal/agent"
 	"linkcode/internal/channel"
+	"linkcode/internal/channel/wecom"
 )
 
 func TestBuildQuotePrefix(t *testing.T) {
@@ -18,39 +19,39 @@ func TestBuildQuotePrefix(t *testing.T) {
 			name:   "short message",
 			input:  "hello",
 			n:      30,
-			expect: "> hello\n\n",
+			expect: "> hello\n",
 		},
 		{
 			name:   "long message truncated",
 			input:  "这是一条很长的消息用来测试截断功能的正确性",
 			n:      10,
-			expect: "> 这是一条很长的消息用...\n\n",
+			expect: "> 这是一条很长的消息用...\n",
 		},
 		{
 			name:   "exactly n chars",
 			input:  "12345",
 			n:      5,
-			expect: "> 12345\n\n",
+			expect: "> 12345\n",
 		},
 		{
 			name:   "empty message",
 			input:  "",
 			n:      30,
-			expect: "> \n\n",
+			expect: "> \n",
 		},
 		{
 			name:   "emoji in message",
 			input:  "hello 😀 world!!!",
 			n:      10,
-			expect: "> hello 😀 wo...\n\n",
+			expect: "> hello 😀 wo...\n",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildQuotePrefix(tt.input, tt.n)
+			got := quotePrefix(wecom.WeComStyler{}, tt.input, tt.n)
 			if got != tt.expect {
-				t.Errorf("buildQuotePrefix(%q, %d) = %q, want %q", tt.input, tt.n, got, tt.expect)
+				t.Errorf("quotePrefix(%q, %d) = %q, want %q", tt.input, tt.n, got, tt.expect)
 			}
 		})
 	}

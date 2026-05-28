@@ -45,6 +45,7 @@ type Router struct {
 	agentRunner agent.Runner
 	gw          *gateway.Gateway
 	statusMgr   *StatusManager
+	styler      channel.Styler
 
 	mu                  sync.Mutex
 	pendingQuestions    map[int64]*agent.Question   // sessionID -> pending question
@@ -54,17 +55,18 @@ type Router struct {
 }
 
 // New creates a new Router.
-func New(sessMgr *session.Manager, pool *botpool.Pool, runner agent.Runner, gw *gateway.Gateway, statusMgr *StatusManager) *Router {
+func New(sessMgr *session.Manager, pool *botpool.Pool, runner agent.Runner, gw *gateway.Gateway, statusMgr *StatusManager, styler channel.Styler) *Router {
 	return &Router{
-		sessionMgr:         sessMgr,
-		botPool:            pool,
-		agentRunner:        runner,
-		gw:                 gw,
-		statusMgr:          statusMgr,
-		pendingQuestions:     make(map[int64]*agent.Question),
-		interruptedSessions:  make(map[int64]bool),
-		pendingMessages:      make(map[int64][]channel.Message),
-		thinkingStartedAt:    make(map[int64]time.Time),
+		sessionMgr:          sessMgr,
+		botPool:             pool,
+		agentRunner:         runner,
+		gw:                  gw,
+		statusMgr:           statusMgr,
+		styler:              styler,
+		pendingQuestions:    make(map[int64]*agent.Question),
+		interruptedSessions: make(map[int64]bool),
+		pendingMessages:     make(map[int64][]channel.Message),
+		thinkingStartedAt:   make(map[int64]time.Time),
 	}
 }
 
@@ -92,7 +94,8 @@ func (r *Router) HandleWorkerEvent(msg channel.Message) {
 	wd, _ := r.botPool.ResolveWorkDir(botWD)
 
 	ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
-		Text: fmt.Sprintf("你好，我是你的 %s「%s」\n工作目录：%s\n有什么任务要交给我吗？\n发送 /help 查看可用命令。", displayAgentType(sess.AgentType), sess.Name, wd),
+		Text: fmt.Sprintf("你好，我是你的 %s「%s」\n工作目录：%s\n发送 %s 查看可用命令。",
+			displayAgentType(sess.AgentType), sess.Name, wd, r.styler.Bold("/help")),
 	})
 }
 
@@ -252,22 +255,26 @@ func (r *Router) sendQuestionMenu(msg channel.Message, q *agent.Question) {
 	}
 }
 
-// buildQuotePrefix formats the first n characters of the user's original message
-// as a markdown blockquote prefix, so the fallback proactive message gives context
-// about which user message it is responding to.
-func buildQuotePrefix(userMsg string, n int) string {
-	runes := []rune(userMsg)
+// quotePrefix truncates text to n runes and wraps it in platform-specific quote markup.
+func quotePrefix(styler channel.Styler, text string, n int) string {
+	runes := []rune(text)
 	if len(runes) > n {
-		return fmt.Sprintf("> %s...\n\n", string(runes[:n]))
+		return styler.Quote(string(runes[:n]) + "...") + "\n"
 	}
-	return fmt.Sprintf("> %s\n\n", userMsg)
+	return styler.Quote(text) + "\n"
 }
 
 // spinPrefix builds the stream prefix for the current spinner frame.
 func spinPrefix(runes []rune, iconIdx int, dotIdx int, name string) string {
 	icon := string(runes[iconIdx%len(runes)])
-	dots := strings.Repeat(".", (dotIdx%4)+1)
-	return fmt.Sprintf("[%s] %s thinking%s\n\n", icon, name, dots)
+	if name != "" {
+		return fmt.Sprintf("[%s] %s thinking", icon, name)
+	}
+	return fmt.Sprintf("[%s] thinking", icon)
+}
+
+func spinDots(dotIdx int) string {
+	return strings.Repeat(".", (dotIdx%4)+1)
 }
 
 func (r *Router) sendStreamReply(msg channel.Message, text string, streamID string, finish bool) bool {
@@ -321,6 +328,34 @@ func (r *Router) queueIndicator(sessionID int64) string {
 		return ""
 	}
 	return fmt.Sprintf("  [waiting %s]", subscriptNum(n))
+}
+
+// streamStatus returns the elapsed time string (for the Bar title) and an optional
+// timeout warning (which goes into the Box body to keep the title short).
+func (r *Router) streamStatus(sessionID int64, streamTimeout time.Duration) (timeStr string, warning string) {
+	r.mu.Lock()
+	startedAt, ok := r.thinkingStartedAt[sessionID]
+	r.mu.Unlock()
+	if !ok || streamTimeout <= 0 {
+		return "", ""
+	}
+	elapsed := time.Since(startedAt)
+	timeStr = fmt.Sprintf("（%s）", formatDurationShort(elapsed))
+	if elapsed > streamTimeout-30*time.Second {
+		remaining := streamTimeout - elapsed
+		if remaining < 0 {
+			remaining = 0
+		}
+		warning = r.styler.StreamWarning(remaining)
+	}
+	return
+}
+
+func formatDurationShort(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
 }
 
 func formatDuration(d time.Duration) string {

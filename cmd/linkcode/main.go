@@ -143,6 +143,7 @@ func main() {
 	botPool := botpool.New(db, cfg.EncryptKey, cfg.Agent.DefaultWorkDir)
 	sessionMgr := session.New(db)
 	agentRunner := claude.NewRunner(cfg.Agent.ClaudeCodePath)
+	imStyler := wecom.WeComStyler{}
 
 	// Create control bot channel.
 	ctrlChan := wecom.New(cfg.ControlBot.BotID, cfg.ControlBot.Secret)
@@ -152,8 +153,8 @@ func main() {
 
 	// Initialize controller and router.
 	statusMgr := router.NewStatusManager(gw, sessionMgr)
-	ctrl := controller.New(sessionMgr, botPool, gw)
-	rtr := router.New(sessionMgr, botPool, agentRunner, gw, statusMgr)
+	ctrl := controller.New(sessionMgr, botPool, gw, imStyler)
+	rtr := router.New(sessionMgr, botPool, agentRunner, gw, statusMgr, imStyler)
 
 	// Wire worker bot handlers globally via gateway.
 	gw.SetWorkerMessageHandler(func(msg channel.Message) {
@@ -180,10 +181,9 @@ func main() {
 		reply := ctrl.HandleMessage(ctx, msg)
 		if reply != "" {
 			if err := ctrlChan.SendMessage(ctx, msg.UserID, channel.MessageContent{
-				Text:          reply,
-				ReplyToID:     msg.ID,
-				OriginalReqID: msg.ReqID,
-				ChatID:        msg.ChatID,
+				Text:      reply,
+				ReplyToID: msg.ID,
+				ChatID:    msg.ChatID,
 			}); err != nil {
 				log.Printf("[main] send control reply: %v", err)
 			}

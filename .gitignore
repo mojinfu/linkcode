@@ -43,4 +43,8 @@ configs/linkcode.yaml
 问题记录*
 
 # Claude Code local settings
-.claude/
+.claude/internal/router/devmsg/
+
+# Local dev test tools (contain bot credentials)
+cmd/devmsg/
+internal/router/devmsg/

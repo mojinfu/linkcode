@@ -77,13 +77,10 @@ function Invoke-Run {
         Remove-Item $PidFile -Force
     }
 
-    if ($IsWin) {
-        $proc = Start-Process -FilePath $Binary -ArgumentList "-config", $Config `
-            -WindowStyle Hidden -PassThru
-    } else {
-        $proc = Start-Process -FilePath $Binary -ArgumentList "-config", $Config `
-            -NoNewWindow -PassThru -RedirectStandardOutput $Log -RedirectStandardError $Log
-    }
+    $stdoutLog = if ($IsWin) { Join-Path $env:TEMP "linkcode-stdout.log" } else { $Log }
+    $proc = Start-Process -FilePath $Binary -ArgumentList "-config", $Config `
+        -WindowStyle Hidden -PassThru `
+        -RedirectStandardOutput $stdoutLog -RedirectStandardError $Log
 
     Start-Sleep -Seconds 2
 
