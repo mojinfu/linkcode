@@ -3,16 +3,12 @@ package claude
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 
 	"linkcode/internal/agent"
 	"linkcode/internal/procman"
 )
-
-// ErrSessionExists is returned when trying to start a session that is already running.
-var ErrSessionExists = errors.New("claude: session already running")
 
 // Runner manages Claude Code sessions via the CLI.
 type Runner struct {
@@ -41,7 +37,7 @@ func (r *Runner) Start(ctx context.Context, linkCodeSessionID, workDir string) (
 
 	if existing, ok := r.sessions[linkCodeSessionID]; ok {
 		if existing.process.IsAlive() {
-			return existing, ErrSessionExists
+			return existing, agent.ErrBusy
 		}
 		delete(r.sessions, linkCodeSessionID)
 	}
@@ -68,7 +64,7 @@ func (r *Runner) Resume(ctx context.Context, linkCodeSessionID, claudeSessionID,
 
 	if existing, ok := r.sessions[linkCodeSessionID]; ok {
 		if existing.process.IsAlive() {
-			return existing, ErrSessionExists
+			return existing, agent.ErrBusy
 		}
 		delete(r.sessions, linkCodeSessionID)
 	}

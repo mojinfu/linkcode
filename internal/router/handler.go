@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -77,12 +78,13 @@ func (r *Router) handleNew(msg channel.Message, sess *session.Session) {
 	r.mu.Lock()
 	delete(r.pendingQuestions, sess.ID)
 	delete(r.interruptedSessions, sess.ID)
+	delete(r.pendingMessages, sess.ID)
+	delete(r.thinkingStartedAt, sess.ID)
 	r.mu.Unlock()
 	r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateSleeped})
 
 	// Create a new session reusing the agent name.
-	newName := sess.Name
-	newSess, err := r.sessionMgr.Create(newName, sess.AgentType, "", 0)
+	newSess, err := r.sessionMgr.Create(sess.Name, sess.AgentType, "", 0)
 	if err != nil {
 		log.Printf("[router] handleNew: create session: %v", err)
 		r.sendReply(msg, fmt.Sprintf("创建新 Session 失败：%v", err))
@@ -118,9 +120,7 @@ func (r *Router) handleNew(msg channel.Message, sess *session.Session) {
 }
 
 // handleResetDefaultWorkDir sets the bot-level default working directory.
-// This directory is used as cmd.Dir when starting the Claude process.
 // Takes effect after /new (next session start).
-// Usage: /resetdefaultworkdir [path]
 func (r *Router) handleResetDefaultWorkDir(msg channel.Message, sess *session.Session) {
 	parts := strings.Fields(msg.Content)
 	if len(parts) < 2 {
@@ -151,8 +151,6 @@ func (r *Router) handleResetDefaultWorkDir(msg channel.Message, sess *session.Se
 }
 
 // handleWorkDir asks Claude about its current working directory.
-// Unlike /resetdefaultworkdir (which shows the configured default),
-// this sends a natural-language question to Claude to get the actual pwd.
 func (r *Router) handleWorkDir(msg channel.Message, sess *session.Session) {
 	msg.Content = "请告诉我你当前所在的工作目录路径是什么？用一句话回答。"
 	r.handleLLM(msg, sess)
@@ -177,6 +175,41 @@ func (r *Router) handleHelp(msg channel.Message) {
 func (r *Router) handleLLM(msg channel.Message, sess *session.Session) {
 	ctx := context.Background()
 
+	// Verify bot channel first — no point doing anything if we can't reply.
+	ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
+	if !ok || !ch.IsConnected() {
+		r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateReconnecting})
+		r.sendReply(msg, "连接已断开，正在重连，请稍后重试。")
+		return
+	}
+
+	// Resolve work directory for this session.
+	bot, _ := r.botPool.GetByID(sess.BoundBotID)
+	botWD := ""
+	if bot != nil {
+		botWD = bot.WorkDir
+	}
+	workDir, _ := r.botPool.ResolveWorkDir(botWD)
+
+	// Resume or start agent process.
+	agentSess, err := r.getOrCreateAgentSession(ctx, sess, workDir)
+	if err != nil {
+		log.Printf("[router] agent session: %v", err)
+		if errors.Is(err, agent.ErrBusy) {
+			r.enqueueMessage(sess, msg)
+			return
+		}
+		r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateDizzy})
+		r.sendReply(msg, "启动/唤醒 Agent 失败，请重试。")
+		return
+	}
+
+	r.mu.Lock()
+	r.thinkingStartedAt[sess.ID] = time.Now()
+	r.mu.Unlock()
+
+	_ = r.sessionMgr.Touch(sess.ID)
+
 	// Bootstrap status session.
 	r.statusMgr.Send(StatusEvent{
 		SessionID:   sess.ID,
@@ -197,33 +230,6 @@ func (r *Router) handleLLM(msg channel.Message, sess *session.Session) {
 	// Build the input JSON for the agent.
 	inputJSON := r.buildUserInput(msg, sess)
 
-	// Verify bot channel is healthy.
-	ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
-	if !ok || !ch.IsConnected() {
-		r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateReconnecting})
-		r.sendReply(msg, "连接已断开，正在重连，请稍后重试。")
-		return
-	}
-
-	// Resolve work directory for this session.
-	bot, _ := r.botPool.GetByID(sess.BoundBotID)
-	botWD := ""
-	if bot != nil {
-		botWD = bot.WorkDir
-	}
-	workDir, _ := r.botPool.ResolveWorkDir(botWD)
-
-	// Resume or start agent process.
-	agentSess, err := r.getOrCreateAgentSession(ctx, sess, workDir)
-	if err != nil {
-		log.Printf("[router] agent session: %v", err)
-		r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateDizzy})
-		r.sendReply(msg, "启动/唤醒 Agent 失败，请重试。")
-		return
-	}
-
-	_ = r.sessionMgr.Touch(sess.ID)
-
 	outputCh, err := agentSess.Send(ctx, inputJSON)
 	if err != nil {
 		log.Printf("[router] send to agent: %v", err)
@@ -233,6 +239,7 @@ func (r *Router) handleLLM(msg channel.Message, sess *session.Session) {
 	}
 
 	r.streamToUser(msg, sess, outputCh)
+	r.drainPendingMessages(sess)
 }
 
 // buildUserInput constructs the stream-json text to send to the agent.
@@ -270,7 +277,8 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 
 	// Send initial spinner frame.
 	spinnerDotIdx++
-	if !r.sendStreamReply(msg, spinPrefix(spinnerRunes, spinnerIconIdx, spinnerDotIdx, sess.Name), streamID, false) {
+	frame := spinPrefix(spinnerRunes, spinnerIconIdx, spinnerDotIdx, sess.Name) + r.queueIndicator(sess.ID)
+	if !r.sendStreamReply(msg, frame, streamID, false) {
 		streamBroken = true
 	}
 
@@ -290,7 +298,7 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 				return
 			case agent.KindText:
 				cache.textBuf.WriteString(chunk.Content)
-				if !r.sendStreamReply(msg, spinPrefix(spinnerRunes, spinnerIconIdx, spinnerDotIdx, sess.Name)+cache.textBuf.String(), streamID, false) {
+				if !r.sendStreamReply(msg, spinPrefix(spinnerRunes, spinnerIconIdx, spinnerDotIdx, sess.Name)+r.queueIndicator(sess.ID)+cache.textBuf.String(), streamID, false) {
 					streamBroken = true
 				}
 				spinnerInterval = spinnerMinInterval
@@ -311,7 +319,7 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 			}
 			spinnerIconIdx++
 			spinnerDotIdx++
-			frameText := spinPrefix(spinnerRunes, spinnerIconIdx, spinnerDotIdx, sess.Name)
+			frameText := spinPrefix(spinnerRunes, spinnerIconIdx, spinnerDotIdx, sess.Name) + r.queueIndicator(sess.ID)
 			if cache.textBuf.Len() > 0 {
 				frameText += cache.textBuf.String()
 			}
@@ -351,13 +359,15 @@ done:
 	if streamBroken {
 		if responseText != "" {
 			ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
-			if ok {
+			if ok && ch.IsConnected() {
 				prefix := buildQuotePrefix(msg.Content, 30)
 				doneText := fmt.Sprintf("%s[✓] %s stand by\n\n%s", prefix, sess.Name, responseText)
 				ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
 					Text:   doneText,
 					ChatID: msg.ChatID,
 				})
+			} else if responseText != "" {
+				log.Printf("[router] stream broken and channel dead for bot %s, response saved to session %d", msg.BotID, sess.ID)
 			}
 		}
 		if cache.question != nil {
@@ -406,8 +416,45 @@ func (r *Router) getOrCreateAgentSession(ctx context.Context, sess *session.Sess
 	return agentSess, nil
 }
 
+// enqueueMessage saves the message to the pending queue and notifies the user.
+func (r *Router) enqueueMessage(sess *session.Session, msg channel.Message) {
+	r.mu.Lock()
+	r.pendingMessages[sess.ID] = append(r.pendingMessages[sess.ID], msg)
+	queued := len(r.pendingMessages[sess.ID])
+	startedAt, ok := r.thinkingStartedAt[sess.ID]
+	r.mu.Unlock()
+
+	elapsed := time.Duration(0)
+	if ok {
+		elapsed = time.Since(startedAt)
+	}
+	r.sendReply(msg, fmt.Sprintf(
+		"正在思考中（已过 %s），你的消息已排队（队列 %d 条）。回复 /stop 中断当前任务，或等待思考完成后逐一处理。",
+		formatDuration(elapsed), queued,
+	))
+}
+
+// drainPendingMessages processes queued messages one by one after the current
+// agent process finishes.
+func (r *Router) drainPendingMessages(sess *session.Session) {
+	time.Sleep(300 * time.Millisecond)
+
+	r.mu.Lock()
+	if len(r.pendingMessages[sess.ID]) == 0 {
+		delete(r.thinkingStartedAt, sess.ID)
+		r.mu.Unlock()
+		return
+	}
+	msg := r.pendingMessages[sess.ID][0]
+	r.pendingMessages[sess.ID] = r.pendingMessages[sess.ID][1:]
+	delete(r.pendingQuestions, sess.ID)
+	r.mu.Unlock()
+
+	log.Printf("[router] draining pending message for session %d", sess.ID)
+	r.handleLLM(msg, sess)
+}
+
 // parseCommand returns the first word of content if it starts with "/", otherwise empty.
-// "hello" → "", "/stop" → "/stop", "/ " → ""
 func parseCommand(content string) string {
 	if len(content) < 2 {
 		return ""
