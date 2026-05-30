@@ -50,7 +50,7 @@ func (WeComStyler) StreamWarning(remaining time.Duration) string {
 }
 
 func (WeComStyler) Cost(totalCost, turnCost float64) string {
-	return fmt.Sprintf("total $%.2f | current $%.2f", totalCost, turnCost)
+	return fmt.Sprintf("total $%.2f + $%.2f", totalCost, turnCost)
 }
 
 func formatDuration(d time.Duration) string {
