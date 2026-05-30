@@ -151,24 +151,10 @@ func (p *Process) Stop() error {
 		_ = err
 	}
 
-	timeout := 5 * time.Second
-	done := make(chan error, 1)
-	go func() {
-		done <- p.cmd.Wait()
-	}()
-
-	select {
-	case <-time.After(timeout):
-		if killErr := p.cmd.Process.Kill(); killErr != nil {
-			return fmt.Errorf("procman: kill process: %w", killErr)
-		}
-	case err := <-done:
-		if err != nil {
-			return fmt.Errorf("procman: wait process: %w", err)
-		}
-	}
-
-	// Channel closed by readOutput goroutine when process exits.
+	// Let waitForExit be the sole caller of cmd.Wait() and the sole
+	// closer of p.output. Calling cmd.Wait() here races with waitForExit
+	// and on Windows causes undefined behavior (double-Wait is explicitly
+	// unsupported).
 	return nil
 }
 

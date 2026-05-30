@@ -70,7 +70,12 @@ func New(sessMgr *session.Manager, pool *botpool.Pool, runner agent.Runner, gw *
 	}
 }
 
-// HandleWorkerEvent handles events from worker bots (enter_chat, etc.).
+// PendingCount returns the number of queued messages for a session.
+func (r *Router) PendingCount(sessionID int64) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.pendingMessages[sessionID])
+}
 func (r *Router) HandleWorkerEvent(msg channel.Message) {
 	if msg.MsgType != channel.MsgTypeEnterChat {
 		return

@@ -937,3 +937,113 @@ func TestStart_LargeOutput(t *testing.T) {
 		t.Errorf("expected 0 errors, got %d", errorCount)
 	}
 }
+
+	// TestStop_ClosesOutputChannel reproduces the /stop-not-working bug:
+	// when a process is streaming output (user sent a message, agent is thinking),
+	// and Stop() is called from another goroutine (user sent /stop),
+	// the output channel must close promptly so streamToUser can exit.
+	//
+	// The bug: procman.Stop() and waitForExit() both call cmd.Wait() on the same
+	// process. On Windows, Go's os/exec explicitly documents that multiple
+	// simultaneous Wait calls are not supported and may cause undefined behavior.
+	// On all platforms, the double-Wait creates a race where:
+	//   1. Stop()'s Wait() consumes the process state
+	//   2. waitForExit's Wait() blocks indefinitely (already consumed)
+	//   3. close(p.output) is never called
+	//   4. streamToUser spins forever — user sees elapsed time keep increasing
+	func TestStop_ClosesOutputChannel(t *testing.T) {
+		if testing.Short() {
+			t.Skip("skipping integration test in short mode")
+		}
+
+		dir := t.TempDir()
+
+		fakeBin := filepath.Join(dir, "fakeclaude_stoppable")
+		if runtime.GOOS == "windows" {
+			fakeBin += ".exe"
+		}
+		build := exec.Command("go", "build", "-o", fakeBin, "testdata/fakeclaude_stoppable/main.go")
+		if out, err := build.CombinedOutput(); err != nil {
+			t.Fatalf("build fake claude stoppable: %v\n%s", err, out)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		proc, err := Start(ctx, fakeBin, dir, "")
+		if err != nil {
+			t.Fatalf("Start() failed: %v", err)
+		}
+
+		outputCh, err := proc.Send(ctx, `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}`)
+		if err != nil {
+			t.Fatalf("Send() failed: %v", err)
+		}
+
+		// Consume a few chunks to confirm the process is alive and streaming.
+		var firstChunks []agent.OutputChunk
+		timeout := time.After(3 * time.Second)
+		for i := 0; i < 3; {
+			select {
+			case chunk, ok := <-outputCh:
+				if !ok {
+					t.Fatal("output channel closed before we could call Stop() — process died too early")
+				}
+				if chunk.Kind == agent.KindText {
+					firstChunks = append(firstChunks, chunk)
+					i++
+				}
+			case <-timeout:
+				t.Fatal("timed out waiting for initial chunks — process not streaming?")
+			}
+		}
+		t.Logf("got %d initial chunks, process is alive=%v", len(firstChunks), proc.IsAlive())
+
+		if !proc.IsAlive() {
+			t.Fatal("process died before Stop() — cannot reproduce the bug")
+		}
+
+		// Simulate /stop: call Stop() from this goroutine while the output
+		// consumer (below) is still reading.
+		stopDone := make(chan error, 1)
+		go func() {
+			stopDone <- proc.Stop()
+		}()
+
+		// The output channel MUST close within a reasonable time after Stop().
+		// If the double-Wait bug exists, waitForExit's cmd.Wait() hangs and
+		// close(p.output) is never called — the test will time out here.
+		channelClosed := make(chan struct{})
+		go func() {
+			for range outputCh {
+				// drain remaining chunks
+			}
+			close(channelClosed)
+		}()
+
+		select {
+		case <-channelClosed:
+			t.Log("output channel closed promptly after Stop() — no bug")
+		case <-time.After(8 * time.Second):
+			// The double-Wait bug: waitForExit's cmd.Wait() is stuck because
+			// Stop() already consumed the process exit state.
+			t.Error("BUG REPRODUCED: output channel did NOT close within 8s of Stop()")
+			t.Error("This means streamToUser would spin forever with increasing elapsed time.")
+			t.Error("Root cause: double cmd.Wait() in Stop() + waitForExit().")
+			t.Error("On Windows this is explicitly documented as undefined behavior.")
+		}
+
+		// Verify Stop() itself returns.
+		select {
+		case err := <-stopDone:
+			if err != nil {
+				t.Logf("Stop() returned error: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("Stop() itself timed out after 5s")
+		}
+
+		if proc.IsAlive() {
+			t.Error("process still marked alive after Stop() returned")
+		}
+	}

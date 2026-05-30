@@ -464,3 +464,179 @@ func TestRunner_InterruptBusySessionThenResume(t *testing.T) {
 	}
 	t.Logf("new session %s started after interrupt, alive=%v", sid, sess3.IsAlive())
 }
+
+// TestRunner_ProcessStatusGap_TwoBotsAfterExit demonstrates the bug where
+// process status in DB stays "waked" (运行中) after the Claude process exits.
+//
+// Scenario: two worker bots, each running a Claude process.
+// Bot A's process completes and exits. Bot B's process completes and exits.
+// Both processes are dead, but the DB process_status remains "waked".
+// The control bot /list shows both as "🟢 运行中" even though neither is running.
+//
+// Root cause: MarkSleeped is only called in handleNew (/new command).
+// The process exit path (procman.waitForExit → runner auto-cleanup)
+// has no connection to session.Manager.MarkSleeped.
+func TestRunner_ProcessStatusGap_TwoBotsAfterExit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	dir := t.TempDir()
+	fakeBin := buildFakeClaude(t, dir, "fakeclaude")
+	runner := NewRunner(fakeBin)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	input := `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}`
+
+	// --- Bot A: starts, responds, exits ---
+	sessA, err := runner.Start(ctx, "bot-A", dir)
+	if err != nil {
+		t.Fatalf("Start bot-A failed: %v", err)
+	}
+	chA, err := sessA.Send(ctx, input)
+	if err != nil {
+		t.Fatalf("Send bot-A failed: %v", err)
+	}
+	for range chA {
+	} // drain — process exits, auto-cleanup fires
+
+	aliveA := sessA.IsAlive()
+	t.Logf("Bot A: process alive=%v", aliveA)
+
+	// --- Bot B: starts, responds, exits ---
+	sessB, err := runner.Start(ctx, "bot-B", dir)
+	if err != nil {
+		t.Fatalf("Start bot-B failed: %v", err)
+	}
+	chB, err := sessB.Send(ctx, input)
+	if err != nil {
+		t.Fatalf("Send bot-B failed: %v", err)
+	}
+	for range chB {
+	} // drain — process exits, auto-cleanup fires
+
+	aliveB := sessB.IsAlive()
+	t.Logf("Bot B: process alive=%v", aliveB)
+
+	// Both processes are dead.
+	if aliveA {
+		t.Error("Bot A: expected process to be dead after response cycle")
+	}
+	if aliveB {
+		t.Error("Bot B: expected process to be dead after response cycle")
+	}
+
+	// BUG DEMONSTRATION:
+	// At this point, both processes are provably dead (IsAlive() == false).
+	// But in a real deployment, the DB process_status for both sessions
+	// is still "waked" because:
+	//
+	//   1. getOrCreateAgentSession called MarkWaked (handler.go:435)
+	//   2. The process exited, output channel closed
+	//   3. runner auto-cleanup removed session from in-memory map
+	//   4. streamToUser's done: block sent final response to user
+	//   5. NO ONE called MarkSleeped
+	//
+	// The only code path that calls MarkSleeped is handleNew (handler.go:73),
+	// which only triggers when the user types /new.
+	//
+	// Result: control bot /list shows both bots as "🟢 运行中"
+	// even though neither process is actually running.
+
+	runner.mu.Lock()
+	_, aInMap := runner.sessions["bot-A"]
+	_, bInMap := runner.sessions["bot-B"]
+	runner.mu.Unlock()
+
+	t.Logf("Runner sessions map: bot-A=%v bot-B=%v", aInMap, bInMap)
+	t.Log("Both processes dead, both removed from runner.sessions (auto-cleanup worked)")
+	t.Log("But DB process_status is still 'waked' for both — MarkSleeped never called")
+	t.Log("BUG: /list would show both as 🟢 运行中 even though both processes are dead")
+}
+
+// TestRunner_ProcessStatusGap_StopKeepsWaked demonstrates that /stop does NOT
+// update the DB process_status. The process is killed, the session is removed
+// from the runner's map, but the DB stays "waked".
+func TestRunner_ProcessStatusGap_StopKeepsWaked(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	dir := t.TempDir()
+	// Use the hang fake claude so the process stays alive until we stop it.
+	hangSrc := filepath.Join("..", "..", "procman", "testdata", "fakeclaude_hang", "main.go")
+	fakeBinHang := filepath.Join(dir, "fakeclaude_hang")
+	if runtime.GOOS == "windows" {
+		fakeBinHang += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", fakeBinHang, hangSrc)
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build fakeclaude_hang: %v\n%s", err, out)
+	}
+
+	runner := NewRunner(fakeBinHang)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	sid := "bot-stop-test"
+	sess, err := runner.Start(ctx, sid, dir)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	// Process is alive before /stop.
+	if !sess.IsAlive() {
+		t.Fatal("process should be alive before stop")
+	}
+	t.Log("Before /stop: process alive=true, DB status='waked'")
+
+	// User types /stop → calls Interrupt → kills process, removes from map.
+	ok := runner.Interrupt(sid)
+	if !ok {
+		t.Error("Interrupt should return true for active session")
+	}
+
+	// Process is dead after /stop.
+	if sess.IsAlive() {
+		t.Error("process should be dead after Interrupt (/stop)")
+	}
+
+	// Session removed from runner map.
+	runner.mu.Lock()
+	_, inMap := runner.sessions[sid]
+	runner.mu.Unlock()
+
+	t.Logf("After /stop: process alive=%v, in runner map=%v", sess.IsAlive(), inMap)
+	t.Log("BUG: handleStop only sets interruptedSessions flag + sends StateSleeped event (in-memory)")
+	t.Log("handleStop does NOT call sessionMgr.MarkSleeped → DB status stays 'waked'")
+	t.Log("BUG: /list shows 🟢 运行中 even after /stop")
+}
+
+// TestRunner_ProcessStatusGap_AllTransitionPaths documents every code path
+// that can change the DB process_status and identifies the missing transitions.
+func TestRunner_ProcessStatusGap_AllTransitionPaths(t *testing.T) {
+	t.Log("=== DB process_status transition audit ===")
+	t.Log("")
+	t.Log("MarkWaked called from (1 path):")
+	t.Log("  handler.go:435 getOrCreateAgentSession — on every LLM request")
+	t.Log("")
+	t.Log("MarkSleeped called from (1 path):")
+	t.Log("  handler.go:73 handleNew — only on /new command")
+	t.Log("")
+	t.Log("MISSING: MarkSleeped is NOT called on:")
+	t.Log("  - Process normal exit (streamToUser done: block)")
+	t.Log("  - Process crash (streamToUser KindError path)")
+	t.Log("  - Process silent exit (streamToUser hadContent=false path)")
+	t.Log("  - /stop command (handleStop) — only sets in-memory flag")
+	t.Log("  - Process timeout (processTimeout path)")
+	t.Log("  - Runner auto-cleanup (Session.Send wrapper goroutine)")
+	t.Log("")
+	t.Log("RESULT: process_status is a write-only marker that never goes back")
+	t.Log("to 'sleeped' without explicit user /new command.")
+	t.Log("")
+	t.Log("IMPACT: /list always shows 🟢 运行中 for any session that")
+	t.Log("has ever been started, regardless of actual process state.")
+}

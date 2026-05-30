@@ -47,26 +47,34 @@ type userState struct {
 	listSessions []listSessionItem // cached for reconnect
 }
 
+// QueueInfo provides pending message counts for sessions.
+// The router implements this to expose queue depth per worker bot.
+type QueueInfo interface {
+	PendingCount(sessionID int64) int
+}
+
 // Controller orchestrates the main control bot.
 type Controller struct {
-	sessionMgr   *session.Manager
-	botPool      *botpool.Pool
-	gw           *gateway.Gateway
-	styler       channel.Styler
+	sessionMgr    *session.Manager
+	botPool       *botpool.Pool
+	gw            *gateway.Gateway
+	styler        channel.Styler
 	claudeCodePath string // path to claude CLI, used by /restart
+	queueInfo     QueueInfo
 
 	mu         sync.Mutex
 	userStates map[string]*userState
 }
 
 // New creates a new Controller.
-func New(sessMgr *session.Manager, pool *botpool.Pool, gw *gateway.Gateway, styler channel.Styler, claudeCodePath string) *Controller {
+func New(sessMgr *session.Manager, pool *botpool.Pool, gw *gateway.Gateway, styler channel.Styler, claudeCodePath string, queueInfo QueueInfo) *Controller {
 	return &Controller{
 		sessionMgr:    sessMgr,
 		botPool:       pool,
 		gw:            gw,
 		styler:        styler,
 		claudeCodePath: claudeCodePath,
+		queueInfo:     queueInfo,
 		userStates:    make(map[string]*userState),
 	}
 }
@@ -384,10 +392,11 @@ func (c *Controller) handleList(userID string) string {
 	st.listSessions = make([]listSessionItem, 0, len(valid))
 
 	for i, s := range valid {
-		status := "🟢 运行中"
-		if s.ProcessStatus == "sleeped" {
-			status = "💤 休眠"
+		queueCount := 0
+		if c.queueInfo != nil {
+			queueCount = c.queueInfo.PendingCount(s.ID)
 		}
+		queueStatus := fmt.Sprintf("队列: %d", queueCount)
 
 		connStatus := "⚪ 未知"
 		isConnected := false
@@ -422,7 +431,7 @@ func (c *Controller) handleList(userID string) string {
 
 		wd, source := c.botPool.ResolveWorkDir(botWD)
 
-		sb.WriteString(fmt.Sprintf("%d. %s  %s  %s\n", i+1, s.Name, status, connStatus))
+		sb.WriteString(fmt.Sprintf("%d. %s  %s  %s\n", i+1, s.Name, queueStatus, connStatus))
 		sb.WriteString(fmt.Sprintf("   Bot：%s\n", botName))
 		sb.WriteString(fmt.Sprintf("   工作目录：%s（%s）\n\n", wd, source))
 	}
