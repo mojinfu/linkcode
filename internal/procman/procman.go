@@ -272,10 +272,11 @@ func (p *Process) waitForExit(readersDone *sync.WaitGroup) {
 // or:     {"type":"result","subtype":"success","result":"...","stop_reason":"end_turn"}
 // or:     {"type":"system","subtype":"init",...}
 type claudeStreamJSON struct {
-	Type    string              `json:"type"`
-	Subtype string              `json:"subtype"`
-	Result  string              `json:"result"`
-	Message *claudeStreamMsg    `json:"message"`
+	Type         string           `json:"type"`
+	Subtype      string           `json:"subtype"`
+	Result       string           `json:"result"`
+	TotalCostUSD float64          `json:"total_cost_usd"`
+	Message      *claudeStreamMsg `json:"message"`
 }
 
 type claudeStreamMsg struct {
@@ -372,9 +373,9 @@ func parseOutputLine(line []byte) agent.OutputChunk {
 		return agent.OutputChunk{Kind: agent.KindThinking}
 	case "result":
 		if raw.Subtype == "error" || raw.Subtype == "error_during_execution" {
-			return agent.OutputChunk{Kind: agent.KindError, Content: stripANSI(raw.Result)}
+			return agent.OutputChunk{Kind: agent.KindError, Content: stripANSI(raw.Result), CostUSD: raw.TotalCostUSD}
 		}
-		return agent.OutputChunk{Kind: agent.KindFinal, Content: stripANSI(raw.Result)}
+		return agent.OutputChunk{Kind: agent.KindFinal, Content: stripANSI(raw.Result), CostUSD: raw.TotalCostUSD}
 	default:
 		return agent.OutputChunk{Kind: agent.KindText, Content: stripANSI(raw.Result)}
 	}

@@ -25,6 +25,10 @@ type Styler interface {
 
 	// StreamWarning returns a platform-formatted timeout warning.
 	StreamWarning(remaining time.Duration) string
+
+	// Cost formats cumulative session cost for display.
+	// totalCost is the session-wide cumulative cost, turnCost is the last turn's cost.
+	Cost(totalCost, turnCost float64) string
 }
 
 // PlainStyler returns text without any markup, suitable as a fallback
@@ -37,3 +41,4 @@ func (PlainStyler) Bold(text string) string                   { return text }
 func (PlainStyler) DiffSuffix(seq int) string                 { return "" }
 func (PlainStyler) Quote(text string) string                  { return text }
 func (PlainStyler) StreamWarning(remaining time.Duration) string { return "" }
+func (PlainStyler) Cost(totalCost, turnCost float64) string   { return "" }

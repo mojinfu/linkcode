@@ -49,6 +49,10 @@ func (WeComStyler) StreamWarning(remaining time.Duration) string {
 	return fmt.Sprintf("⚡ stream %s 后断联，Agent 继续后台运行", formatDuration(remaining))
 }
 
+func (WeComStyler) Cost(totalCost, turnCost float64) string {
+	return fmt.Sprintf("total $%.2f | current $%.2f", totalCost, turnCost)
+}
+
 func formatDuration(d time.Duration) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%d 秒", int(d.Seconds()))

@@ -52,6 +52,7 @@ type Router struct {
 	interruptedSessions map[int64]bool              // sessionID -> process was /stop'd
 	pendingMessages     map[int64][]channel.Message // sessionID -> queued messages while process is busy
 	thinkingStartedAt   map[int64]time.Time         // sessionID -> when the current thinking started
+	sessionCosts        map[int64]float64           // sessionID -> cumulative total_cost_usd
 }
 
 // New creates a new Router.
@@ -67,6 +68,7 @@ func New(sessMgr *session.Manager, pool *botpool.Pool, runner agent.Runner, gw *
 		interruptedSessions: make(map[int64]bool),
 		pendingMessages:     make(map[int64][]channel.Message),
 		thinkingStartedAt:   make(map[int64]time.Time),
+		sessionCosts:        make(map[int64]float64),
 	}
 }
 
@@ -76,6 +78,14 @@ func (r *Router) PendingCount(sessionID int64) int {
 	defer r.mu.Unlock()
 	return len(r.pendingMessages[sessionID])
 }
+
+// SessionCost returns the cumulative total_cost_usd for a session.
+func (r *Router) SessionCost(sessionID int64) float64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.sessionCosts[sessionID]
+}
+
 func (r *Router) HandleWorkerEvent(msg channel.Message) {
 	if msg.MsgType != channel.MsgTypeEnterChat {
 		return

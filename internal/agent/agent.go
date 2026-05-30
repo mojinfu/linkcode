@@ -14,6 +14,7 @@ var ErrBusy = errors.New("agent: previous process still running")
 type OutputChunk struct {
 	Content  string
 	Kind     OutputKind
+	CostUSD  float64 // total_cost_usd from result message (cumulative session cost)
 	Question *Question // non-nil when Kind == KindQuestion
 }
 

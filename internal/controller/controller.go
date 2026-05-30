@@ -53,6 +53,12 @@ type QueueInfo interface {
 	PendingCount(sessionID int64) int
 }
 
+// CostInfo provides cumulative USD cost for sessions.
+// The router implements this to expose total cost per worker bot.
+type CostInfo interface {
+	SessionCost(sessionID int64) float64
+}
+
 // Controller orchestrates the main control bot.
 type Controller struct {
 	sessionMgr    *session.Manager
@@ -61,13 +67,14 @@ type Controller struct {
 	styler        channel.Styler
 	claudeCodePath string // path to claude CLI, used by /restart
 	queueInfo     QueueInfo
+	costInfo      CostInfo
 
 	mu         sync.Mutex
 	userStates map[string]*userState
 }
 
 // New creates a new Controller.
-func New(sessMgr *session.Manager, pool *botpool.Pool, gw *gateway.Gateway, styler channel.Styler, claudeCodePath string, queueInfo QueueInfo) *Controller {
+func New(sessMgr *session.Manager, pool *botpool.Pool, gw *gateway.Gateway, styler channel.Styler, claudeCodePath string, queueInfo QueueInfo, costInfo CostInfo) *Controller {
 	return &Controller{
 		sessionMgr:    sessMgr,
 		botPool:       pool,
@@ -75,6 +82,7 @@ func New(sessMgr *session.Manager, pool *botpool.Pool, gw *gateway.Gateway, styl
 		styler:        styler,
 		claudeCodePath: claudeCodePath,
 		queueInfo:     queueInfo,
+		costInfo:      costInfo,
 		userStates:    make(map[string]*userState),
 	}
 }
@@ -398,6 +406,15 @@ func (c *Controller) handleList(userID string) string {
 		}
 		queueStatus := fmt.Sprintf("队列: %d", queueCount)
 
+		sessionCost := 0.0
+		if c.costInfo != nil {
+			sessionCost = c.costInfo.SessionCost(s.ID)
+		}
+		costStatus := ""
+		if sessionCost > 0 {
+			costStatus = fmt.Sprintf("$%.2f", sessionCost)
+		}
+
 		connStatus := "⚪ 未知"
 		isConnected := false
 		if cs, ok := connStatuses[s.BoundBotID]; ok {
@@ -431,7 +448,7 @@ func (c *Controller) handleList(userID string) string {
 
 		wd, source := c.botPool.ResolveWorkDir(botWD)
 
-		sb.WriteString(fmt.Sprintf("%d. %s  %s  %s\n", i+1, s.Name, queueStatus, connStatus))
+		sb.WriteString(fmt.Sprintf("%d. %s  %s  %s  %s\n", i+1, s.Name, queueStatus, connStatus, costStatus))
 		sb.WriteString(fmt.Sprintf("   Bot：%s\n", botName))
 		sb.WriteString(fmt.Sprintf("   工作目录：%s（%s）\n\n", wd, source))
 	}

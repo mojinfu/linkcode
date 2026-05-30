@@ -1,4 +1,4 @@
-﻿package router
+package router
 
 import (
 	"context"
@@ -80,6 +80,7 @@ func (r *Router) handleNew(msg channel.Message, sess *session.Session) {
 	delete(r.interruptedSessions, sess.ID)
 	delete(r.pendingMessages, sess.ID)
 	delete(r.thinkingStartedAt, sess.ID)
+	delete(r.sessionCosts, sess.ID)
 	r.mu.Unlock()
 	r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateSleeped})
 
@@ -273,6 +274,7 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 	var cache streamCache
 	streamBroken := false
 	hadContent := false
+	var turnCostUSD float64
 
 	streamTimeout := time.Duration(0)
 	if ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID); ok {
@@ -324,6 +326,13 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 			case agent.KindFinal:
 				hadContent = true
 				cache.fullResponse = chunk.Content
+				if chunk.CostUSD > 0 {
+					r.mu.Lock()
+					prevCost := r.sessionCosts[sess.ID]
+					turnCostUSD = chunk.CostUSD - prevCost
+					r.sessionCosts[sess.ID] = chunk.CostUSD
+					r.mu.Unlock()
+				}
 			case agent.KindThinking, agent.KindToolUse:
 				if chunk.Content != "" {
 					spinnerInterval = spinnerMinInterval
@@ -388,12 +397,14 @@ done:
 		responseText = cache.fullResponse
 	}
 
+	costLine := r.buildCostLine(sess.ID, turnCostUSD)
+
 	if streamBroken {
 		if responseText != "" {
 			ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
 			if ok && ch.IsConnected() {
 				prefix := quotePrefix(r.styler, msg.Content, 30)
-				doneText := r.styler.Bar("[✓] stand by") + "\n\n" + prefix + "\n" + responseText
+				doneText := r.styler.Bar("[✓] stand by") + costLine + "\n\n" + prefix + "\n" + responseText
 				ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
 					Text:   doneText,
 					ChatID: msg.ChatID,
@@ -409,7 +420,7 @@ done:
 			r.sendQuestionMenu(msg, cache.question)
 		}
 	} else {
-		doneText := r.styler.Bar("[✓] stand by") + "\n\n" + responseText
+		doneText := r.styler.Bar("[✓] stand by") + costLine + "\n\n" + responseText
 		r.sendStreamReply(msg, doneText, streamID, true)
 
 		if cache.question != nil {
@@ -423,6 +434,18 @@ done:
 	if responseText != "" {
 		_ = r.sessionMgr.AddMessage(sess.ID, "agent", responseText, "text")
 	}
+}
+
+// buildCostLine returns a cost display string using the platform styler.
+// Returns empty string if turnCostUSD is 0 (no cost data available).
+func (r *Router) buildCostLine(sessionID int64, turnCostUSD float64) string {
+	r.mu.Lock()
+	totalCost := r.sessionCosts[sessionID]
+	r.mu.Unlock()
+	if totalCost <= 0 {
+		return ""
+	}
+	return "\n\n" + r.styler.Cost(totalCost, turnCostUSD)
 }
 
 // getOrCreateAgentSession resumes or starts an agent session for the given LinkCode session.
