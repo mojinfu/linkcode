@@ -404,7 +404,7 @@ done:
 			ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
 			if ok && ch.IsConnected() {
 				prefix := quotePrefix(r.styler, msg.Content, 30)
-				doneText := r.styler.Bar("[✓] stand by") + costLine + "\n\n" + prefix + "\n" + responseText
+				doneText := r.styler.Bar("[✓] stand by"+costLine) + "\n\n" + prefix + "\n" + responseText
 				ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
 					Text:   doneText,
 					ChatID: msg.ChatID,
@@ -420,7 +420,7 @@ done:
 			r.sendQuestionMenu(msg, cache.question)
 		}
 	} else {
-		doneText := r.styler.Bar("[✓] stand by") + costLine + "\n\n" + responseText
+		doneText := r.styler.Bar("[✓] stand by"+costLine) + "\n\n" + responseText
 		r.sendStreamReply(msg, doneText, streamID, true)
 
 		if cache.question != nil {
@@ -436,8 +436,9 @@ done:
 	}
 }
 
-// buildCostLine returns a cost display string using the platform styler.
-// Returns empty string if turnCostUSD is 0 (no cost data available).
+// buildCostLine returns a cost display string for the standby bar.
+// prevCost is the cumulative cost before this turn, turnCost is this turn's cost.
+// Returns empty string if no cost data is available.
 func (r *Router) buildCostLine(sessionID int64, turnCostUSD float64) string {
 	r.mu.Lock()
 	totalCost := r.sessionCosts[sessionID]
@@ -445,7 +446,8 @@ func (r *Router) buildCostLine(sessionID int64, turnCostUSD float64) string {
 	if totalCost <= 0 {
 		return ""
 	}
-	return "\n\n" + r.styler.Cost(totalCost, turnCostUSD)
+	prevCost := totalCost - turnCostUSD
+	return "  " + r.styler.Cost(prevCost, turnCostUSD)
 }
 
 // getOrCreateAgentSession resumes or starts an agent session for the given LinkCode session.
