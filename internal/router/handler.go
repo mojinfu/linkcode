@@ -272,11 +272,14 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 
 	var cache streamCache
 	streamBroken := false
+	hadContent := false
 
 	streamTimeout := time.Duration(0)
 	if ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID); ok {
 		streamTimeout = ch.StreamTimeout()
 	}
+
+	processTimeout := time.After(10 * time.Minute)
 
 	buildStatusBar := func() string {
 		timeStr, warning := r.streamStatus(sess.ID, streamTimeout)
@@ -299,6 +302,7 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 			if !ok {
 				goto done
 			}
+			processTimeout = time.After(10 * time.Minute)
 			spinnerDotIdx++
 			log.Printf("[router] chunk kind=%s contentLen=%d", chunk.Kind, len(chunk.Content))
 			switch chunk.Kind {
@@ -308,6 +312,7 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 				r.sendStreamReply(msg, r.styler.Bar("[💫] error")+"\n"+chunk.Content, streamID, true)
 				return
 			case agent.KindText:
+				hadContent = true
 				cache.textBuf.WriteString(chunk.Content)
 				if !r.sendStreamReply(msg, buildStatusBar()+"\n"+cache.textBuf.String(), streamID, false) {
 					streamBroken = true
@@ -317,6 +322,7 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 			case agent.KindQuestion:
 				cache.question = chunk.Question
 			case agent.KindFinal:
+				hadContent = true
 				cache.fullResponse = chunk.Content
 			case agent.KindThinking, agent.KindToolUse:
 				if chunk.Content != "" {
@@ -324,6 +330,14 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 					ticker.Reset(spinnerInterval)
 				}
 			}
+		case <-processTimeout:
+			if streamBroken {
+				continue
+			}
+			// Warn the user but don't force-kill — the user decides whether to /stop.
+			r.sendStreamReply(msg, r.styler.Bar("[⏰] 超时")+"\nAgent 已运行 10 分钟仍未结束，如需终止请回复 /stop", streamID, false)
+			processTimeout = time.After(10 * time.Minute)
+
 		case <-ticker.C:
 			if streamBroken {
 				continue
@@ -359,6 +373,13 @@ done:
 		if !r.sendStreamReply(msg, stopText, streamID, true) {
 			r.sendReply(msg, stopText)
 		}
+		return
+	}
+
+	if !hadContent {
+		r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateDizzy})
+		doneText := r.styler.Bar("[💫] 无响应") + "\nAgent 进程异常退出，请稍后重试"
+		r.sendStreamReply(msg, doneText, streamID, true)
 		return
 	}
 

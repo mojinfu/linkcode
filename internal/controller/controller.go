@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -26,7 +28,15 @@ const (
 	MenuCreateAgentSecret // waiting for secret
 	MenuCreateAgentType   // waiting for agent type
 	MenuSetDefaultWorkDir // waiting for new work_dir path
+	MenuList              // viewing agent list, reply with number to reconnect
 )
+
+type listSessionItem struct {
+	sessionID int64
+	botID     int64
+	name      string
+	connected bool
+}
 
 type userState struct {
 	state        MenuState
@@ -34,27 +44,30 @@ type userState struct {
 	tmpAgentName string // agent name being created
 	tmpBotID     string // platform bot ID being created
 	tmpSecret    string // decrypted secret being created
+	listSessions []listSessionItem // cached for reconnect
 }
 
 // Controller orchestrates the main control bot.
 type Controller struct {
-	sessionMgr *session.Manager
-	botPool    *botpool.Pool
-	gw         *gateway.Gateway
-	styler     channel.Styler
+	sessionMgr   *session.Manager
+	botPool      *botpool.Pool
+	gw           *gateway.Gateway
+	styler       channel.Styler
+	claudeCodePath string // path to claude CLI, used by /restart
 
 	mu         sync.Mutex
 	userStates map[string]*userState
 }
 
 // New creates a new Controller.
-func New(sessMgr *session.Manager, pool *botpool.Pool, gw *gateway.Gateway, styler channel.Styler) *Controller {
+func New(sessMgr *session.Manager, pool *botpool.Pool, gw *gateway.Gateway, styler channel.Styler, claudeCodePath string) *Controller {
 	return &Controller{
-		sessionMgr: sessMgr,
-		botPool:    pool,
-		gw:         gw,
-		styler:     styler,
-		userStates: make(map[string]*userState),
+		sessionMgr:    sessMgr,
+		botPool:       pool,
+		gw:            gw,
+		styler:        styler,
+		claudeCodePath: claudeCodePath,
+		userStates:    make(map[string]*userState),
 	}
 }
 
@@ -79,6 +92,8 @@ func (c *Controller) HandleMessage(ctx context.Context, msg channel.Message) str
 		return c.handleAddBot(userID, text)
 	case strings.HasPrefix(text, "/list"):
 		return c.handleList(userID)
+	case strings.HasPrefix(text, "/restart"):
+		return c.handleRestart(ctx, msg)
 	}
 
 	state := c.getState(userID)
@@ -95,6 +110,8 @@ func (c *Controller) HandleMessage(ctx context.Context, msg channel.Message) str
 		return c.handleCreateAgentType(ctx, userID, text)
 	case MenuSetDefaultWorkDir:
 		return c.handleSetDefaultWorkDir(userID, text)
+	case MenuList:
+		return c.handleListChoice(ctx, userID, text)
 	default:
 		return c.showMainMenu(userID)
 	}
@@ -110,12 +127,14 @@ func (c *Controller) showMainMenu(userID string) string {
 }
 
 func (c *Controller) handleHelp() string {
-	return c.styler.Box("总控命令",
-		"\"/start\"   显示主菜单\n"+
-			"\"/addbot\"  快速创建 Agent：/addbot 名称 BotID Secret\n"+
-			"\"/list\"    查看所有 Agent 的状态与工作目录\n"+
-			"\"/help\"    显示本帮助\n"+
-			"\n推荐通过主菜单分步创建 Agent")
+	help := "\"/start\"   显示主菜单\n" +
+		"\"/addbot\"  快速创建 Agent：/addbot 名称 BotID Secret\n" +
+		"\"/list\"    查看所有 Agent 的状态与工作目录\n" +
+		"\"/restart\" 重启 LinkCode\n" +
+		"\"/help\"    显示本帮助\n" +
+		"\n推荐通过主菜单分步创建 Agent"
+
+	return c.styler.Box("总控命令", help)
 }
 
 func (c *Controller) handleMainMenuChoice(userID, text string) string {
@@ -338,8 +357,6 @@ func (c *Controller) handleAddBot(userID, text string) string {
 // ============================================================================
 
 func (c *Controller) handleList(userID string) string {
-	c.setState(userID, MenuNone)
-
 	sessions, err := c.sessionMgr.ListActive()
 	if err != nil {
 		return fmt.Sprintf("查询失败：%v", err)
@@ -353,16 +370,47 @@ func (c *Controller) handleList(userID string) string {
 	}
 
 	if len(valid) == 0 {
+		c.setState(userID, MenuNone)
 		return "当前没有 Agent。回复 1 创建一个吧！\n发送 /start 返回主菜单。"
 	}
 
+	connStatuses := c.gw.GetAllWorkerStatuses()
+
 	var sb strings.Builder
 	sb.WriteString("你的 Agent 列表：\n\n")
+
+	// Cache list items for reconnect feature.
+	st := c.getState(userID)
+	st.listSessions = make([]listSessionItem, 0, len(valid))
+
 	for i, s := range valid {
 		status := "🟢 运行中"
 		if s.ProcessStatus == "sleeped" {
 			status = "💤 休眠"
 		}
+
+		connStatus := "⚪ 未知"
+		isConnected := false
+		if cs, ok := connStatuses[s.BoundBotID]; ok {
+			isConnected = cs.Connected
+			if cs.Connected {
+				connStatus = "🔗 已连接"
+			} else {
+				since := time.Since(cs.LastChange)
+				if since < time.Minute {
+					connStatus = "🔴 已断开"
+				} else {
+					connStatus = fmt.Sprintf("🔴 已断开 (%s)", formatDurationShort(since))
+				}
+			}
+		}
+
+		st.listSessions = append(st.listSessions, listSessionItem{
+			sessionID: s.ID,
+			botID:     s.BoundBotID,
+			name:      s.Name,
+			connected: isConnected,
+		})
 
 		bot, _ := c.botPool.GetByID(s.BoundBotID)
 		botName := "—"
@@ -374,10 +422,14 @@ func (c *Controller) handleList(userID string) string {
 
 		wd, source := c.botPool.ResolveWorkDir(botWD)
 
-		sb.WriteString(fmt.Sprintf("%d. %s  %s\n", i+1, s.Name, status))
+		sb.WriteString(fmt.Sprintf("%d. %s  %s  %s\n", i+1, s.Name, status, connStatus))
 		sb.WriteString(fmt.Sprintf("   Bot：%s\n", botName))
 		sb.WriteString(fmt.Sprintf("   工作目录：%s（%s）\n\n", wd, source))
 	}
+
+	sb.WriteString("💡 引用本条消息回复数字可重连断开的 Agent")
+
+	c.setState(userID, MenuList)
 	return c.styler.Box("Agent 列表", sb.String())
 }
 
@@ -455,11 +507,89 @@ func (c *Controller) setState(userID string, state MenuState) {
 	}
 }
 
+// handleListChoice handles a numbered reply to the /list output, triggering
+// reconnection for the chosen agent if it is disconnected.
+func (c *Controller) handleListChoice(ctx context.Context, userID, text string) string {
+	text = strings.TrimSpace(text)
+	if text == "0" {
+		return c.showMainMenu(userID)
+	}
+
+	idx := 0
+	if _, err := fmt.Sscanf(text, "%d", &idx); err != nil || idx < 1 {
+		return c.styler.Box("Agent 列表", "请回复数字选择要重连的 Agent，或回复 0 返回菜单\n\n💡 引用本条消息后回复数字")
+	}
+
+	st := c.getState(userID)
+	if idx > len(st.listSessions) {
+		return c.styler.Box("Agent 列表", fmt.Sprintf("没有第 %d 个 Agent，请重新选择（1-%d）：\n或回复 0 返回菜单", idx, len(st.listSessions)))
+	}
+
+	item := st.listSessions[idx-1]
+
+	// If already connected, no need to reconnect.
+	if item.connected {
+		return c.styler.Box("Agent 列表", fmt.Sprintf("「%s」已连接，无需重连。\n\n回复其他数字重连其他 Agent，或回复 0 返回菜单。", item.name))
+	}
+
+	// Fetch bot credentials.
+	bot, err := c.botPool.GetByID(item.botID)
+	if err != nil || bot == nil {
+		return fmt.Sprintf("获取 Bot 凭证失败：%v\n发送 /start 返回主菜单。", err)
+	}
+
+	log.Printf("[controller] reconnecting worker bot %d (%s) for agent %s", item.botID, bot.BotID, item.name)
+	if err := c.gw.ReopenWorkerChannel(ctx, item.botID, bot.BotID, bot.Secret); err != nil {
+		log.Printf("[controller] reconnect failed: %v", err)
+		return fmt.Sprintf("「%s」重连失败：%v\n发送 /start 返回主菜单。", item.name, err)
+	}
+
+	// Update cached state so user sees the new status immediately.
+	st.listSessions[idx-1].connected = true
+	c.setState(userID, MenuList)
+
+	return c.styler.Box("Agent 列表", fmt.Sprintf("「%s」已重连成功！\n\n回复其他数字重连其他 Agent，或回复 0 返回菜单。", item.name))
+}
+
+// handleRestart delegates the restart to Claude Code.
+// Claude knows the project layout and OS conventions — it runs the restart
+// command (make.ps1 restart) while linkcode exits immediately.
+func (c *Controller) handleRestart(ctx context.Context, msg channel.Message) string {
+	ctrlChan := c.gw.ControlChannel()
+	if ctrlChan != nil {
+		ctrlChan.SendMessage(ctx, msg.UserID, channel.MessageContent{
+			Text:      "正在重启 LinkCode...",
+			ReplyToID: msg.ID,
+			ChatID:    msg.ChatID,
+		})
+	}
+
+	log.Printf("[controller] restart: spawning claude to handle restart")
+	cmd := exec.Command(c.claudeCodePath, "-p",
+		"请重启 linkcode 服务。项目根目录有 make.ps1 脚本，运行 `powershell -File make.ps1 restart` 即可完成重启。重启完成后退出。",
+		"--permission-mode", "bypassPermissions",
+		"--output-format", "text")
+
+	if err := cmd.Start(); err != nil {
+		log.Printf("[controller] restart: spawn claude failed: %v", err)
+		return fmt.Sprintf("启动重启进程失败：%v", err)
+	}
+
+	log.Printf("[controller] restart: claude pid %d spawned, exiting linkcode", cmd.Process.Pid)
+	go cmd.Wait()
+
+	time.Sleep(200 * time.Millisecond)
+	os.Exit(0)
+	return "" // unreachable
+}
+
 // detectMenuStage inspects quoted text to determine which menu the user is replying to.
 func detectMenuStage(quotedText string) MenuState {
 	switch {
 	case strings.Contains(quotedText, "\"1. 创建 Agent\""):
 		return MenuMain
+	case strings.Contains(quotedText, "Agent 列表"):
+		return MenuList
 	case strings.Contains(quotedText, "请输入 Agent 名称"):
 		return MenuCreateAgentName
 	case strings.Contains(quotedText, "请输入企微 BotID"):
@@ -472,4 +602,21 @@ func detectMenuStage(quotedText string) MenuState {
 		return MenuSetDefaultWorkDir
 	}
 	return MenuNone
+}
+
+// formatDurationShort returns a compact human-readable duration string.
+func formatDurationShort(d time.Duration) string {
+	if d < time.Minute {
+		return "刚刚"
+	}
+	m := int(d.Minutes())
+	if m < 60 {
+		return fmt.Sprintf("%d分钟前", m)
+	}
+	h := m / 60
+	if h < 24 {
+		return fmt.Sprintf("%d小时前", h)
+	}
+	days := h / 24
+	return fmt.Sprintf("%d天前", days)
 }

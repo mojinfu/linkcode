@@ -457,9 +457,16 @@ func (c *Channel) readLoop() {
 		if err != nil {
 			log.Printf("[wecom] bot %s: read error: %v", c.botID, err)
 			c.connMu.Lock()
+			if c.conn != nil {
+				c.conn.Close()
+				c.conn = nil
+			}
+			wasConnected := c.connected
 			c.connected = false
-			c.conn = nil
 			c.connMu.Unlock()
+			if wasConnected && c.connChangeHandler != nil {
+				go c.connChangeHandler(false)
+			}
 
 			if !c.reconnect(attempt) {
 				return

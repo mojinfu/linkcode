@@ -35,7 +35,8 @@ type Process struct {
 	cancel           context.CancelFunc
 	mu               sync.Mutex
 	alive            bool
-	sessionID        string // sessionID passed to procman (for resume)
+	diedAt           time.Time // when the process exited (set in waitForExit)
+	sessionID        string    // sessionID passed to procman (for resume)
 	claudeSessionID  string // session_id extracted from claude's init message
 }
 
@@ -55,6 +56,12 @@ func Start(ctx context.Context, claudePath, workDir, sessionID string) (*Process
 	args = append(args, "--output-format", "stream-json", "--input-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions")
 
 	cmd := exec.CommandContext(ctx, claudePath, args...)
+	cmd.Env = os.Environ()
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "ANTHROPIC") {
+			log.Printf("[procman] env: %s", e)
+		}
+	}
 	if workDir != "" {
 		if info, err := os.Stat(workDir); err != nil || !info.IsDir() {
 			log.Printf("[procman] workDir %q unavailable (%v), using current directory", workDir, err)
@@ -76,6 +83,12 @@ func Start(ctx context.Context, claudePath, workDir, sessionID string) (*Process
 		return nil, fmt.Errorf("procman: stdout pipe: %w", err)
 	}
 
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("procman: stderr pipe: %w", err)
+	}
+
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("procman: start %s: %w", claudePath, err)
@@ -90,8 +103,11 @@ func Start(ctx context.Context, claudePath, workDir, sessionID string) (*Process
 		sessionID:   sessionID,
 	}
 
-	go p.readOutput(stdout)
-	go p.waitForExit()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); p.readOutput(stdout) }()
+	go func() { defer wg.Done(); p.readStderr(stderr) }()
+	go p.waitForExit(&wg)
 
 	return p, nil
 }
@@ -171,13 +187,19 @@ func (p *Process) IsAlive() bool {
 	return p.alive
 }
 
+// DiedAt returns the time the process exited, or zero if still running.
+func (p *Process) DiedAt() time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.diedAt
+}
+
 // OutputChannel returns the raw output channel for the router to consume.
 func (p *Process) OutputChannel() <-chan agent.OutputChunk {
 	return p.output
 }
 
 func (p *Process) readOutput(stdout io.Reader) {
-	defer close(p.output)
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024) // 10MB max line
 
@@ -215,16 +237,34 @@ func (p *Process) readOutput(stdout io.Reader) {
 	}
 }
 
-func (p *Process) waitForExit() {
+func (p *Process) readStderr(stderr io.Reader) {
+	scanner := bufio.NewScanner(stderr)
+	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+		select {
+		case p.output <- agent.OutputChunk{
+			Kind:    agent.KindError,
+			Content: "[stderr] " + line,
+		}:
+		default:
+		}
+	}
+}
+
+func (p *Process) waitForExit(readersDone *sync.WaitGroup) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[procman] waitForExit panic recovered: %v", r)
 		}
-		p.mu.Lock()
-		p.alive = false
-		p.mu.Unlock()
 	}()
+
 	err := p.cmd.Wait()
+	readersDone.Wait() // ensure all stdout/stderr is consumed before closing channel
+
 	p.mu.Lock()
 	if p.alive && err != nil {
 		select {
@@ -235,7 +275,10 @@ func (p *Process) waitForExit() {
 		default:
 		}
 	}
+	p.alive = false
 	p.mu.Unlock()
+
+	close(p.output)
 }
 
 // claudeStreamJSON is the JSON format for Claude Code stream-json output.

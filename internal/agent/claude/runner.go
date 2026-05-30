@@ -4,7 +4,9 @@ package claude
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
+	"time"
 
 	"linkcode/internal/agent"
 	"linkcode/internal/procman"
@@ -39,6 +41,15 @@ func (r *Runner) Start(ctx context.Context, linkCodeSessionID, workDir string) (
 		if existing.process.IsAlive() {
 			return existing, agent.ErrBusy
 		}
+		// Rapid restart protection: if the process died within 30s, delay to
+		// avoid repeatedly spawning processes that fail fast.
+		if diedAt := existing.process.DiedAt(); !diedAt.IsZero() {
+			sinceDeath := time.Since(diedAt)
+			if sinceDeath < 30*time.Second {
+				log.Printf("[runner] session %s: rapid restart detected (died %v ago), delaying 5s", linkCodeSessionID, sinceDeath)
+				time.Sleep(5 * time.Second)
+			}
+		}
 		delete(r.sessions, linkCodeSessionID)
 	}
 
@@ -65,6 +76,13 @@ func (r *Runner) Resume(ctx context.Context, linkCodeSessionID, claudeSessionID,
 	if existing, ok := r.sessions[linkCodeSessionID]; ok {
 		if existing.process.IsAlive() {
 			return existing, agent.ErrBusy
+		}
+		if diedAt := existing.process.DiedAt(); !diedAt.IsZero() {
+			sinceDeath := time.Since(diedAt)
+			if sinceDeath < 30*time.Second {
+				log.Printf("[runner] session %s: rapid restart detected (died %v ago), delaying 5s", linkCodeSessionID, sinceDeath)
+				time.Sleep(5 * time.Second)
+			}
 		}
 		delete(r.sessions, linkCodeSessionID)
 	}
@@ -114,8 +132,26 @@ type Session struct {
 }
 
 // Send sends input to the Claude Code process.
+// It wraps the output channel so that when the process exits, the session
+// is automatically removed from the runner's map (dead session cleanup).
 func (s *Session) Send(ctx context.Context, input string) (<-chan agent.OutputChunk, error) {
-	return s.process.Send(ctx, input)
+	ch, err := s.process.Send(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+
+	wrapped := make(chan agent.OutputChunk, 256)
+	go func() {
+		defer close(wrapped)
+		for chunk := range ch {
+			wrapped <- chunk
+		}
+		if !s.process.IsAlive() {
+			s.runner.removeSession(s.id)
+			log.Printf("[runner] session %s auto-removed (process dead)", s.id)
+		}
+	}()
+	return wrapped, nil
 }
 
 // Stop terminates the Claude Code process.
