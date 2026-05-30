@@ -410,10 +410,7 @@ func (c *Controller) handleList(userID string) string {
 		if c.costInfo != nil {
 			sessionCost = c.costInfo.SessionCost(s.ID)
 		}
-		costStatus := ""
-		if sessionCost > 0 {
-			costStatus = fmt.Sprintf("$%.2f", sessionCost)
-		}
+		costStatus := fmt.Sprintf("$%.2f", sessionCost)
 
 		connStatus := "⚪ 未知"
 		isConnected := false

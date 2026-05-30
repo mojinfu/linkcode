@@ -237,7 +237,7 @@ func main() {
 
 	// Start admin panel.
 	if cfg.Admin.Enabled {
-		adminSrv := admin.New(cfg.Admin.BindAddr, sessionMgr, botPool)
+		adminSrv := admin.New(cfg.Admin.BindAddr, sessionMgr, botPool, rtr)
 		go func() {
 			log.Printf("admin panel: http://%s", cfg.Admin.BindAddr)
 			if err := adminSrv.Start(); err != nil {
