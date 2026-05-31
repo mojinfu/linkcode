@@ -6,6 +6,8 @@ import (
 	"os"
 	"time"
 
+	"linkcode/internal/pricing"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -33,11 +35,12 @@ type BotCredential struct {
 
 // AgentConfig holds agent-related settings.
 type AgentConfig struct {
-	DefaultType       string        `yaml:"default_type"`
-	IdleTimeout       time.Duration `yaml:"idle_timeout"`
-	ClaudeCodePath    string        `yaml:"claude_code_path"`
-	DefaultWorkDir    string        `yaml:"default_work_dir"`
-	DeepSeekProxyAddr string        `yaml:"deepseek_proxy_addr"`
+	DefaultType       string                     `yaml:"default_type"`
+	IdleTimeout       time.Duration              `yaml:"idle_timeout"`
+	ClaudeCodePath    string                     `yaml:"claude_code_path"`
+	DefaultWorkDir    string                     `yaml:"default_work_dir"`
+	DeepSeekProxyAddr string                     `yaml:"deepseek_proxy_addr"`
+	Pricing           map[string]pricing.ModelPricing `yaml:"pricing"`
 }
 
 // AdminConfig holds admin panel settings.

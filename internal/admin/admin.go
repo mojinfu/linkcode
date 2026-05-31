@@ -11,9 +11,9 @@ import (
 	"linkcode/internal/session"
 )
 
-// CostInfo provides cumulative USD cost for sessions.
+// CostInfo provides cumulative cost and token usage for sessions.
 type CostInfo interface {
-	SessionCost(sessionID int64) float64
+	SessionUsage(sessionID int64) (inputTokens, outputTokens int, costUSD float64, known bool)
 }
 
 // Server serves the admin web UI.
@@ -49,9 +49,11 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	costDisplay := make(map[int64]string)
 	if s.costInfo != nil {
 		for _, sess := range sessions {
-			c := s.costInfo.SessionCost(sess.ID)
-			if c > 0 {
-				costDisplay[sess.ID] = fmt.Sprintf("$%.2f", c)
+			_, _, cost, known := s.costInfo.SessionUsage(sess.ID)
+			if known && cost > 0 {
+				costDisplay[sess.ID] = fmt.Sprintf("$%.2f", cost)
+			} else if !known && cost > 0 {
+				costDisplay[sess.ID] = "?"
 			}
 		}
 	}

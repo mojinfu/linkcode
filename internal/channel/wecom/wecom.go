@@ -74,6 +74,12 @@ type Channel struct {
 	// uploadResps stores response bodies for media upload commands.
 	uploadMu    sync.RWMutex
 	uploadResps map[string]json.RawMessage // req_id -> response body
+
+	// streamErrReqID tracks req_ids that received WeCom error 846608
+	// (stream message update expired). The next sendReply with a matching
+	// OriginalReqID will fail fast so the router can fall back to proactive.
+	streamErrMu    sync.Mutex
+	streamErrReqID string
 }
 
 // New creates a new WeCom Channel.
@@ -184,6 +190,16 @@ func (c *Channel) sendReply(content channel.MessageContent) error {
 		return fmt.Errorf("wecom: not connected")
 	}
 
+	// If a previous stream update for this req_id received 846608, fail fast
+	// so the router can switch to proactive (non-stream) delivery.
+	c.streamErrMu.Lock()
+	if c.streamErrReqID == content.OriginalReqID && c.streamErrReqID != "" {
+		c.streamErrReqID = ""
+		c.streamErrMu.Unlock()
+		return fmt.Errorf("wecom: stream message update expired (846608)")
+	}
+	c.streamErrMu.Unlock()
+
 	streamID := content.StreamID
 	if streamID == "" {
 		streamID = fmt.Sprintf("stream_%d", time.Now().UnixNano())
@@ -275,6 +291,13 @@ func (c *Channel) sendProactive(userID string, content channel.MessageContent) e
 
 func (c *Channel) dispatchAck(env wecomEnvelope) {
 	reqID := env.Headers.ReqID
+
+	// Track 846608 (stream message update expired) so sendReply can fail fast.
+	if env.ErrCode == 846608 {
+		c.streamErrMu.Lock()
+		c.streamErrReqID = reqID
+		c.streamErrMu.Unlock()
+	}
 
 	c.uploadMu.Lock()
 	c.uploadResps[reqID] = env.Body

@@ -26,6 +26,7 @@ import (
 	"linkcode/internal/controller"
 	"linkcode/internal/crypto"
 	"linkcode/internal/gateway"
+	"linkcode/internal/pricing"
 	"linkcode/internal/proxy"
 	"linkcode/internal/router"
 	"linkcode/internal/session"
@@ -138,6 +139,17 @@ func main() {
 			log.Fatalf("add work_dir column: %v", err)
 		}
 	}
+	migrationV3, err := os.ReadFile("migrations/003_total_cost.sql")
+	if err != nil {
+		log.Fatalf("read migration 003: %v", err)
+	}
+	if err := db.RunMigrations(string(migrationV3)); err != nil {
+		if strings.Contains(err.Error(), "Duplicate column") {
+			log.Printf("migration note: total_cost column already exists, skipped")
+		} else {
+			log.Fatalf("run migration 003: %v", err)
+		}
+	}
 	log.Println("migrations applied")
 
 	// Start DeepSeek API proxy if needed.
@@ -172,8 +184,9 @@ func main() {
 	gw := gateway.New(ctrlChan)
 
 	// Initialize controller and router.
+	priceCalc := pricing.New(cfg.Agent.Pricing)
 	statusMgr := router.NewStatusManager(gw, sessionMgr)
-	rtr := router.New(sessionMgr, botPool, agentRunner, gw, statusMgr, imStyler)
+	rtr := router.New(sessionMgr, botPool, agentRunner, gw, statusMgr, imStyler, priceCalc)
 	ctrl := controller.New(sessionMgr, botPool, gw, imStyler, cfg.Agent.ClaudeCodePath, rtr, rtr)
 
 	// Wire worker bot handlers globally via gateway.

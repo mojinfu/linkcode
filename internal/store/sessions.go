@@ -21,8 +21,19 @@ type SessionRecord struct {
 	ProcessStatus   ProcessStatus
 	ClaudeSessionID sql.NullString
 	BoundBotID      sql.NullInt64
+	TotalCost       float64
 	CreatedAt       time.Time
 	LastActiveAt    time.Time
+}
+
+const sessionsColumns = `id, name, agent_type, process_status, claude_session_id, bound_bot_id, total_cost, created_at, last_active_at`
+
+func scanSession(r *SessionRecord, sc scanner) error {
+	return sc.Scan(&r.ID, &r.Name, &r.AgentType, &r.ProcessStatus, &r.ClaudeSessionID, &r.BoundBotID, &r.TotalCost, &r.CreatedAt, &r.LastActiveAt)
+}
+
+type scanner interface {
+	Scan(dest ...any) error
 }
 
 // InsertSession creates a new session record.
@@ -40,10 +51,8 @@ func (db *DB) InsertSession(name, agentType, claudeSessionID string, boundBotID 
 // GetSessionByID looks up a session by its internal id.
 func (db *DB) GetSessionByID(id int64) (*SessionRecord, error) {
 	r := &SessionRecord{}
-	err := db.QueryRow(
-		`SELECT id, name, agent_type, process_status, claude_session_id, bound_bot_id, created_at, last_active_at FROM sessions WHERE id = ?`,
-		id,
-	).Scan(&r.ID, &r.Name, &r.AgentType, &r.ProcessStatus, &r.ClaudeSessionID, &r.BoundBotID, &r.CreatedAt, &r.LastActiveAt)
+	err := db.QueryRow(`SELECT `+sessionsColumns+` FROM sessions WHERE id = ?`, id).Scan(
+		&r.ID, &r.Name, &r.AgentType, &r.ProcessStatus, &r.ClaudeSessionID, &r.BoundBotID, &r.TotalCost, &r.CreatedAt, &r.LastActiveAt)
 	if err != nil {
 		return nil, err
 	}
@@ -53,10 +62,8 @@ func (db *DB) GetSessionByID(id int64) (*SessionRecord, error) {
 // GetSessionByBotID looks up the session bound to a given bot (internal id).
 func (db *DB) GetSessionByBotID(botInternalID int64) (*SessionRecord, error) {
 	r := &SessionRecord{}
-	err := db.QueryRow(
-		`SELECT id, name, agent_type, process_status, claude_session_id, bound_bot_id, created_at, last_active_at FROM sessions WHERE bound_bot_id = ?`,
-		botInternalID,
-	).Scan(&r.ID, &r.Name, &r.AgentType, &r.ProcessStatus, &r.ClaudeSessionID, &r.BoundBotID, &r.CreatedAt, &r.LastActiveAt)
+	err := db.QueryRow(`SELECT `+sessionsColumns+` FROM sessions WHERE bound_bot_id = ?`, botInternalID).Scan(
+		&r.ID, &r.Name, &r.AgentType, &r.ProcessStatus, &r.ClaudeSessionID, &r.BoundBotID, &r.TotalCost, &r.CreatedAt, &r.LastActiveAt)
 	if err != nil {
 		return nil, err
 	}
@@ -67,11 +74,11 @@ func (db *DB) GetSessionByBotID(botInternalID int64) (*SessionRecord, error) {
 func (db *DB) GetSessionByPlatformBotID(platformBotID string) (*SessionRecord, error) {
 	r := &SessionRecord{}
 	err := db.QueryRow(
-		`SELECT s.id, s.name, s.agent_type, s.process_status, s.claude_session_id, s.bound_bot_id, s.created_at, s.last_active_at
+		`SELECT s.id, s.name, s.agent_type, s.process_status, s.claude_session_id, s.bound_bot_id, s.total_cost, s.created_at, s.last_active_at
 		 FROM sessions s JOIN bots b ON s.bound_bot_id = b.id
 		 WHERE b.bot_id = ?`,
 		platformBotID,
-	).Scan(&r.ID, &r.Name, &r.AgentType, &r.ProcessStatus, &r.ClaudeSessionID, &r.BoundBotID, &r.CreatedAt, &r.LastActiveAt)
+	).Scan(&r.ID, &r.Name, &r.AgentType, &r.ProcessStatus, &r.ClaudeSessionID, &r.BoundBotID, &r.TotalCost, &r.CreatedAt, &r.LastActiveAt)
 	if err != nil {
 		return nil, err
 	}
@@ -81,10 +88,8 @@ func (db *DB) GetSessionByPlatformBotID(platformBotID string) (*SessionRecord, e
 // GetSessionByClaudeID looks up the session by the Claude session identifier.
 func (db *DB) GetSessionByClaudeID(claudeSessionID string) (*SessionRecord, error) {
 	r := &SessionRecord{}
-	err := db.QueryRow(
-		`SELECT id, name, agent_type, process_status, claude_session_id, bound_bot_id, created_at, last_active_at FROM sessions WHERE claude_session_id = ?`,
-		claudeSessionID,
-	).Scan(&r.ID, &r.Name, &r.AgentType, &r.ProcessStatus, &r.ClaudeSessionID, &r.BoundBotID, &r.CreatedAt, &r.LastActiveAt)
+	err := db.QueryRow(`SELECT `+sessionsColumns+` FROM sessions WHERE claude_session_id = ?`, claudeSessionID).Scan(
+		&r.ID, &r.Name, &r.AgentType, &r.ProcessStatus, &r.ClaudeSessionID, &r.BoundBotID, &r.TotalCost, &r.CreatedAt, &r.LastActiveAt)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +99,7 @@ func (db *DB) GetSessionByClaudeID(claudeSessionID string) (*SessionRecord, erro
 // ListActiveSessions returns sessions with waked or sleeped processes.
 func (db *DB) ListActiveSessions() ([]SessionRecord, error) {
 	rows, err := db.Query(
-		`SELECT id, name, agent_type, process_status, claude_session_id, bound_bot_id, created_at, last_active_at FROM sessions WHERE process_status IN (?, ?) ORDER BY last_active_at DESC`,
+		`SELECT `+sessionsColumns+` FROM sessions WHERE process_status IN (?, ?) ORDER BY last_active_at DESC`,
 		string(ProcessWaked), string(ProcessSleeped),
 	)
 	if err != nil {
@@ -105,7 +110,7 @@ func (db *DB) ListActiveSessions() ([]SessionRecord, error) {
 	var sessions []SessionRecord
 	for rows.Next() {
 		var r SessionRecord
-		if err := rows.Scan(&r.ID, &r.Name, &r.AgentType, &r.ProcessStatus, &r.ClaudeSessionID, &r.BoundBotID, &r.CreatedAt, &r.LastActiveAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.AgentType, &r.ProcessStatus, &r.ClaudeSessionID, &r.BoundBotID, &r.TotalCost, &r.CreatedAt, &r.LastActiveAt); err != nil {
 			return nil, err
 		}
 		sessions = append(sessions, r)
@@ -131,6 +136,12 @@ func (db *DB) UpdateClaudeSessionID(sessionID int64, claudeSessionID string) err
 // TouchSession updates last_active_at to now.
 func (db *DB) TouchSession(sessionID int64) error {
 	_, err := db.Exec(`UPDATE sessions SET last_active_at = NOW() WHERE id = ?`, sessionID)
+	return err
+}
+
+// UpdateSessionCost persists the accumulated cost for a session.
+func (db *DB) UpdateSessionCost(sessionID int64, cost float64) error {
+	_, err := db.Exec(`UPDATE sessions SET total_cost = ? WHERE id = ?`, cost, sessionID)
 	return err
 }
 

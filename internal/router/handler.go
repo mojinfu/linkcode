@@ -80,7 +80,7 @@ func (r *Router) handleNew(msg channel.Message, sess *session.Session) {
 	delete(r.interruptedSessions, sess.ID)
 	delete(r.pendingMessages, sess.ID)
 	delete(r.thinkingStartedAt, sess.ID)
-	delete(r.sessionCosts, sess.ID)
+	delete(r.sessionUsage, sess.ID)
 	r.mu.Unlock()
 	r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateSleeped})
 
@@ -285,11 +285,11 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 
 	buildStatusBar := func() string {
 		timeStr, warning := r.streamStatus(sess.ID, streamTimeout)
-	title := spinPrefix(spinnerRunes, spinnerIconIdx, spinnerDotIdx, "") + timeStr + " " + spinDots(spinnerDotIdx) + r.queueIndicator(sess.ID)
-	if warning != "" {
-		return r.styler.Box(title, warning)
-	}
-	return r.styler.Bar(title) + r.styler.DiffSuffix(spinnerDotIdx)
+		title := spinPrefix(spinnerRunes, spinnerIconIdx, spinnerDotIdx, "") + timeStr + " " + spinDots(spinnerDotIdx) + r.queueIndicator(sess.ID)
+		if warning != "" {
+			return r.styler.Box(title, warning)
+		}
+		return r.styler.Bar(title) + r.styler.DiffSuffix(spinnerDotIdx)
 	}
 
 	// Send initial spinner frame.
@@ -326,12 +326,27 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 			case agent.KindFinal:
 				hadContent = true
 				cache.fullResponse = chunk.Content
-				if chunk.CostUSD > 0 {
+				if chunk.TokenUsage != nil && chunk.TokenUsage.InputTokens > 0 {
 					r.mu.Lock()
-					prevCost := r.sessionCosts[sess.ID]
-					turnCostUSD = chunk.CostUSD - prevCost
-					r.sessionCosts[sess.ID] = chunk.CostUSD
+					u := r.sessionUsage[sess.ID]
+					if u == nil {
+						u = &sessionUsageRec{accCost: sess.TotalCost}
+						r.sessionUsage[sess.ID] = u
+					}
+					prevIn := u.inputTokens
+					prevOut := u.outputTokens
+					prevCache := u.cacheReadTokens
+					u.inputTokens += chunk.TokenUsage.InputTokens
+					u.outputTokens += chunk.TokenUsage.OutputTokens
+					u.cacheReadTokens += chunk.TokenUsage.CacheReadTokens
+					if chunk.TokenUsage.Model != "" {
+						u.model = chunk.TokenUsage.Model
+					}
+					turnCost := r.pricingCalc.Cost(u.model, u.inputTokens-prevIn, u.cacheReadTokens-prevCache, u.outputTokens-prevOut)
+					u.accCost += turnCost
+					turnCostUSD = turnCost
 					r.mu.Unlock()
+					_ = r.sessionMgr.SetCost(sess.ID, u.accCost)
 				}
 			case agent.KindThinking, agent.KindToolUse:
 				if chunk.Content != "" {
@@ -441,13 +456,17 @@ done:
 // Returns empty string if no cost data is available.
 func (r *Router) buildCostLine(sessionID int64, turnCostUSD float64) string {
 	r.mu.Lock()
-	totalCost := r.sessionCosts[sessionID]
+	u := r.sessionUsage[sessionID]
 	r.mu.Unlock()
-	if totalCost <= 0 {
+	if u == nil {
 		return ""
 	}
-	prevCost := totalCost - turnCostUSD
-	return "  " + r.styler.Cost(prevCost, turnCostUSD)
+	if u.accCost <= 0 {
+		return ""
+	}
+	prevCost := u.accCost - turnCostUSD
+	symbol := r.pricingCalc.Symbol(u.model)
+	return ", " + r.styler.Cost(prevCost, turnCostUSD, symbol)
 }
 
 // getOrCreateAgentSession resumes or starts an agent session for the given LinkCode session.

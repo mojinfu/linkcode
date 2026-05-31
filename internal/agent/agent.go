@@ -12,10 +12,18 @@ var ErrBusy = errors.New("agent: previous process still running")
 
 // OutputChunk represents a piece of streaming output from an agent.
 type OutputChunk struct {
-	Content  string
-	Kind     OutputKind
-	CostUSD  float64 // total_cost_usd from result message (cumulative session cost)
-	Question *Question // non-nil when Kind == KindQuestion
+	Content    string
+	Kind       OutputKind
+	Question   *Question   // non-nil when Kind == KindQuestion
+	TokenUsage *TokenUsage // non-nil when Kind == KindFinal
+}
+
+// TokenUsage holds token consumption data extracted from the agent's result message.
+type TokenUsage struct {
+	Model           string
+	InputTokens     int
+	OutputTokens    int
+	CacheReadTokens int
 }
 
 // Question represents a structured AskUserQuestion extracted from a tool_use.

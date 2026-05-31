@@ -4,12 +4,13 @@ import (
 	"testing"
 
 	"linkcode/internal/channel"
+	"linkcode/internal/pricing"
 )
 
 // TestPendingCount_ZeroByDefault verifies that a fresh Router returns 0
 // for any session ID — no messages have ever been queued.
 func TestPendingCount_ZeroByDefault(t *testing.T) {
-	r := New(nil, nil, nil, nil, nil, nil)
+	r := New(nil, nil, nil, nil, nil, nil, pricing.New(nil))
 
 	if got := r.PendingCount(1); got != 0 {
 		t.Errorf("PendingCount(1) = %d, want 0", got)
@@ -27,7 +28,7 @@ func TestPendingCount_ZeroByDefault(t *testing.T) {
 // Before the response comes, user sends "再帮我分析一下这段代码".
 // The second message is queued → PendingCount = 1.
 func TestPendingCount_ReflectsEnqueuedMessages(t *testing.T) {
-	r := New(nil, nil, nil, nil, nil, nil)
+	r := New(nil, nil, nil, nil, nil, nil, pricing.New(nil))
 	sid := int64(42)
 
 	// Simulate 1st enqueue (ErrBusy path).
@@ -63,7 +64,7 @@ func TestPendingCount_ReflectsEnqueuedMessages(t *testing.T) {
 // drainPendingMessages shifts msg2 off the queue and processes it.
 // Queue goes from 2 → 1. Controller /list should show 队列: 1.
 func TestPendingCount_DrainDecrements(t *testing.T) {
-	r := New(nil, nil, nil, nil, nil, nil)
+	r := New(nil, nil, nil, nil, nil, nil, pricing.New(nil))
 	sid := int64(7)
 
 	// Start with 3 queued messages (simulating busy agent).
@@ -115,7 +116,7 @@ func TestPendingCount_DrainDecrements(t *testing.T) {
 // handleNew calls: delete(r.pendingMessages, sess.ID)
 // After /new, controller /list should show 队列: 0 for both old and new sessions.
 func TestPendingCount_NewCommandClears(t *testing.T) {
-	r := New(nil, nil, nil, nil, nil, nil)
+	r := New(nil, nil, nil, nil, nil, nil, pricing.New(nil))
 	sid := int64(99)
 
 	// Simulate: agent busy, 2 messages queued.
@@ -148,7 +149,7 @@ func TestPendingCount_NewCommandClears(t *testing.T) {
 //
 // Controller /list should show: A=3, B=0, C=1.
 func TestPendingCount_MultipleSessionsIndependent(t *testing.T) {
-	r := New(nil, nil, nil, nil, nil, nil)
+	r := New(nil, nil, nil, nil, nil, nil, pricing.New(nil))
 
 	// Session A (bot A busy, 3 queued).
 	r.mu.Lock()
@@ -185,14 +186,14 @@ func TestPendingCount_MultipleSessionsIndependent(t *testing.T) {
 // TestPendingCount_QueueInfoInterface is a compile-time assertion that
 // *Router satisfies controller.QueueInfo (PendingCount method).
 func TestPendingCount_QueueInfoInterface(t *testing.T) {
-	var _ interface{ PendingCount(int64) int } = New(nil, nil, nil, nil, nil, nil)
+	var _ interface{ PendingCount(int64) int } = New(nil, nil, nil, nil, nil, nil, pricing.New(nil))
 	// Compiles = *Router satisfies the interface.
 }
 
 // TestPendingCount_RealWorldScenarios documents the expected queue count
 // for each real-world scenario the user should see in /list.
 func TestPendingCount_RealWorldScenarios(t *testing.T) {
-	r := New(nil, nil, nil, nil, nil, nil)
+	r := New(nil, nil, nil, nil, nil, nil, pricing.New(nil))
 
 	// Scenario 1: worker bot 刚创建，还没有人发消息
 	// → queue = 0

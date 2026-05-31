@@ -53,10 +53,9 @@ type QueueInfo interface {
 	PendingCount(sessionID int64) int
 }
 
-// CostInfo provides cumulative USD cost for sessions.
-// The router implements this to expose total cost per worker bot.
+// CostInfo provides cumulative cost and token usage for sessions.
 type CostInfo interface {
-	SessionCost(sessionID int64) float64
+	SessionUsage(sessionID int64) (inputTokens, outputTokens int, costUSD float64, known bool)
 }
 
 // Controller orchestrates the main control bot.
@@ -406,11 +405,15 @@ func (c *Controller) handleList(userID string) string {
 		}
 		queueStatus := fmt.Sprintf("队列: %d", queueCount)
 
-		sessionCost := 0.0
+		costStatus := ""
 		if c.costInfo != nil {
-			sessionCost = c.costInfo.SessionCost(s.ID)
+			_, _, cost, known := c.costInfo.SessionUsage(s.ID)
+			if known && cost > 0 {
+				costStatus = fmt.Sprintf("$%.2f", cost)
+			} else if !known && cost > 0 {
+				costStatus = "?"
+			}
 		}
-		costStatus := fmt.Sprintf("$%.2f", sessionCost)
 
 		connStatus := "⚪ 未知"
 		isConnected := false

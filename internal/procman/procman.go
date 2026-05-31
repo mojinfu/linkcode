@@ -29,15 +29,15 @@ var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b\]
 
 // Process wraps a running agent subprocess.
 type Process struct {
-	cmd              *exec.Cmd
-	stdin            io.WriteCloser
-	output           chan agent.OutputChunk
-	cancel           context.CancelFunc
-	mu               sync.Mutex
-	alive            bool
-	diedAt           time.Time // when the process exited (set in waitForExit)
-	sessionID        string    // sessionID passed to procman (for resume)
-	claudeSessionID  string // session_id extracted from claude's init message
+	cmd             *exec.Cmd
+	stdin           io.WriteCloser
+	output          chan agent.OutputChunk
+	cancel          context.CancelFunc
+	mu              sync.Mutex
+	alive           bool
+	diedAt          time.Time // when the process exited (set in waitForExit)
+	sessionID       string    // sessionID passed to procman (for resume)
+	claudeSessionID string    // session_id extracted from claude's init message
 }
 
 // Start launches a Claude Code subprocess with the given session ID.
@@ -95,12 +95,12 @@ func Start(ctx context.Context, claudePath, workDir, sessionID string) (*Process
 	}
 
 	p := &Process{
-		cmd:         cmd,
-		stdin:       stdin,
-		output:      make(chan agent.OutputChunk, 256),
-		cancel:      cancel,
-		alive:       true,
-		sessionID:   sessionID,
+		cmd:       cmd,
+		stdin:     stdin,
+		output:    make(chan agent.OutputChunk, 256),
+		cancel:    cancel,
+		alive:     true,
+		sessionID: sessionID,
 	}
 
 	var wg sync.WaitGroup
@@ -272,13 +272,27 @@ func (p *Process) waitForExit(readersDone *sync.WaitGroup) {
 // or:     {"type":"result","subtype":"success","result":"...","stop_reason":"end_turn"}
 // or:     {"type":"system","subtype":"init",...}
 type claudeStreamJSON struct {
-	Type         string           `json:"type"`
-	Subtype      string           `json:"subtype"`
-	Result       string           `json:"result"`
-	TotalCostUSD float64          `json:"total_cost_usd"`
-	Message      *claudeStreamMsg `json:"message"`
+	Type    string           `json:"type"`
+	Subtype string           `json:"subtype"`
+	Result  string           `json:"result"`
+	Message *claudeStreamMsg `json:"message"`
+	Usage   *claudeUsage     `json:"usage"`
+	// modelUsage maps model name → per-model usage breakdown.
+	ModelUsage map[string]claudeModelUsage `json:"modelUsage"`
 }
 
+type claudeUsage struct {
+	InputTokens          int `json:"input_tokens"`
+	OutputTokens         int `json:"output_tokens"`
+	CacheReadInputTokens int `json:"cache_read_input_tokens"`
+}
+
+type claudeModelUsage struct {
+	InputTokens          int     `json:"inputTokens"`
+	OutputTokens         int     `json:"outputTokens"`
+	CacheReadInputTokens int     `json:"cacheReadInputTokens"`
+	CostUSD              float64 `json:"costUSD"`
+}
 type claudeStreamMsg struct {
 	Content []claudeStreamContent `json:"content"`
 }
@@ -372,11 +386,48 @@ func parseOutputLine(line []byte) agent.OutputChunk {
 		}
 		return agent.OutputChunk{Kind: agent.KindThinking}
 	case "result":
+		tu := extractTokenUsage(raw)
 		if raw.Subtype == "error" || raw.Subtype == "error_during_execution" {
-			return agent.OutputChunk{Kind: agent.KindError, Content: stripANSI(raw.Result), CostUSD: raw.TotalCostUSD}
+			return agent.OutputChunk{Kind: agent.KindError, Content: stripANSI(raw.Result), TokenUsage: tu}
 		}
-		return agent.OutputChunk{Kind: agent.KindFinal, Content: stripANSI(raw.Result), CostUSD: raw.TotalCostUSD}
+		return agent.OutputChunk{Kind: agent.KindFinal, Content: stripANSI(raw.Result), TokenUsage: tu}
 	default:
 		return agent.OutputChunk{Kind: agent.KindText, Content: stripANSI(raw.Result)}
+	}
+}
+
+// extractTokenUsage pulls token usage from a claude stream-json result message.
+// It prefers modelUsage (per-model breakdown) for the model name; falls back to usage aggregate.
+func extractTokenUsage(raw claudeStreamJSON) *agent.TokenUsage {
+	if raw.Usage == nil && len(raw.ModelUsage) == 0 {
+		return nil
+	}
+
+	var model string
+	var inputTokens, outputTokens, cacheReadTokens int
+
+	if raw.Usage != nil {
+		inputTokens = raw.Usage.InputTokens
+		outputTokens = raw.Usage.OutputTokens
+		cacheReadTokens = raw.Usage.CacheReadInputTokens
+	}
+
+	if len(raw.ModelUsage) > 0 {
+		for m, mu := range raw.ModelUsage {
+			model = m
+			if mu.InputTokens > 0 || mu.OutputTokens > 0 {
+				inputTokens = mu.InputTokens
+				outputTokens = mu.OutputTokens
+				cacheReadTokens = mu.CacheReadInputTokens
+			}
+			break
+		}
+	}
+
+	return &agent.TokenUsage{
+		Model:           model,
+		InputTokens:     inputTokens,
+		OutputTokens:    outputTokens,
+		CacheReadTokens: cacheReadTokens,
 	}
 }

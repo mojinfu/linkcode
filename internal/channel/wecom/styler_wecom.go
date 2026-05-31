@@ -2,6 +2,7 @@ package wecom
 
 import (
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -49,8 +50,11 @@ func (WeComStyler) StreamWarning(remaining time.Duration) string {
 	return fmt.Sprintf("⚡ stream %s 后断联，Agent 继续后台运行", formatDuration(remaining))
 }
 
-func (WeComStyler) Cost(totalCost, turnCost float64) string {
-	return fmt.Sprintf("total $%.2f + $%.2f", totalCost, turnCost)
+func (WeComStyler) Cost(prevCost, turnCost float64, symbol string) string {
+	if math.IsNaN(prevCost) || math.IsNaN(turnCost) {
+		return "cost ? + ?"
+	}
+	return fmt.Sprintf("cost %s%.2f + %s%.4f", symbol, prevCost, symbol, turnCost)
 }
 
 func formatDuration(d time.Duration) string {
