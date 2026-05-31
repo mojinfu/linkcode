@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"linkcode/internal/botpool"
 	"linkcode/internal/channel"
 	"linkcode/internal/gateway"
+	"linkcode/internal/pricing"
 	"linkcode/internal/session"
 )
 
@@ -52,10 +54,21 @@ type Router struct {
 	interruptedSessions map[int64]bool              // sessionID -> process was /stop'd
 	pendingMessages     map[int64][]channel.Message // sessionID -> queued messages while process is busy
 	thinkingStartedAt   map[int64]time.Time         // sessionID -> when the current thinking started
+	sessionUsage        map[int64]*sessionUsageRec  // sessionID -> cumulative token usage
+	pricingCalc         pricing.Calculator
+}
+
+// sessionUsageRec accumulates token usage across turns for a session.
+type sessionUsageRec struct {
+	inputTokens     int
+	outputTokens    int
+	cacheReadTokens int
+	model           string // last used model
+	accCost float64 // accumulated calculated cost
 }
 
 // New creates a new Router.
-func New(sessMgr *session.Manager, pool *botpool.Pool, runner agent.Runner, gw *gateway.Gateway, statusMgr *StatusManager, styler channel.Styler) *Router {
+func New(sessMgr *session.Manager, pool *botpool.Pool, runner agent.Runner, gw *gateway.Gateway, statusMgr *StatusManager, styler channel.Styler, pricingCalc pricing.Calculator) *Router {
 	return &Router{
 		sessionMgr:          sessMgr,
 		botPool:             pool,
@@ -63,14 +76,35 @@ func New(sessMgr *session.Manager, pool *botpool.Pool, runner agent.Runner, gw *
 		gw:                  gw,
 		statusMgr:           statusMgr,
 		styler:              styler,
+		pricingCalc:         pricingCalc,
 		pendingQuestions:    make(map[int64]*agent.Question),
 		interruptedSessions: make(map[int64]bool),
 		pendingMessages:     make(map[int64][]channel.Message),
 		thinkingStartedAt:   make(map[int64]time.Time),
+		sessionUsage:        make(map[int64]*sessionUsageRec),
 	}
 }
 
-// HandleWorkerEvent handles events from worker bots (enter_chat, etc.).
+// PendingCount returns the number of queued messages for a session.
+func (r *Router) PendingCount(sessionID int64) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.pendingMessages[sessionID])
+}
+
+// SessionUsage returns the accumulated token usage and calculated cost for a session.
+// known is false when the model is not configured in pricing (cost should display "?").
+func (r *Router) SessionUsage(sessionID int64) (inputTokens, outputTokens int, costUSD float64, known bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u := r.sessionUsage[sessionID]
+	if u == nil {
+		return 0, 0, 0, false
+	}
+	known = u.model != "" && !math.IsNaN(r.pricingCalc.Cost(u.model, 0, 0, 0))
+	return u.inputTokens, u.outputTokens, u.accCost, known
+}
+
 func (r *Router) HandleWorkerEvent(msg channel.Message) {
 	if msg.MsgType != channel.MsgTypeEnterChat {
 		return

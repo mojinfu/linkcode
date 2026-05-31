@@ -25,15 +25,21 @@ type Styler interface {
 
 	// StreamWarning returns a platform-formatted timeout warning.
 	StreamWarning(remaining time.Duration) string
+
+	// Cost formats cumulative session cost for display.
+	// prevCost is cumulative before this turn, turnCost is this turn's cost.
+	// symbol is the currency symbol (e.g. "¥", "$") from model pricing config.
+	Cost(prevCost, turnCost float64, symbol string) string
 }
 
 // PlainStyler returns text without any markup, suitable as a fallback
 // when no platform-specific styler is available.
 type PlainStyler struct{}
 
-func (PlainStyler) Box(_, content string) string              { return content }
-func (PlainStyler) Bar(title string) string                   { return title }
-func (PlainStyler) Bold(text string) string                   { return text }
-func (PlainStyler) DiffSuffix(seq int) string                 { return "" }
-func (PlainStyler) Quote(text string) string                  { return text }
-func (PlainStyler) StreamWarning(remaining time.Duration) string { return "" }
+func (PlainStyler) Box(_, content string) string                          { return content }
+func (PlainStyler) Bar(title string) string                               { return title }
+func (PlainStyler) Bold(text string) string                               { return text }
+func (PlainStyler) DiffSuffix(seq int) string                             { return "" }
+func (PlainStyler) Quote(text string) string                              { return text }
+func (PlainStyler) StreamWarning(remaining time.Duration) string          { return "" }
+func (PlainStyler) Cost(prevCost, turnCost float64, symbol string) string { return "" }

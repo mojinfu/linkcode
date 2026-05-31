@@ -21,6 +21,7 @@ type Session struct {
 	ProcessStatus   store.ProcessStatus
 	ClaudeSessionID string
 	BoundBotID      int64
+	TotalCost       float64
 	CreatedAt       time.Time
 	LastActiveAt    time.Time
 }
@@ -133,6 +134,11 @@ func (m *Manager) Delete(sessionID int64) error {
 	return m.db.DeleteSession(sessionID)
 }
 
+// SetCost persists the accumulated cost for a session.
+func (m *Manager) SetCost(sessionID int64, cost float64) error {
+	return m.db.UpdateSessionCost(sessionID, cost)
+}
+
 // AddMessage persists a chat message for a session.
 func (m *Manager) AddMessage(sessionID int64, role store.MessageRole, content, contentType string) error {
 	_, err := m.db.InsertMessage(sessionID, role, content, contentType)
@@ -160,6 +166,7 @@ func fromRecord(r *store.SessionRecord) *Session {
 		ProcessStatus:   r.ProcessStatus,
 		ClaudeSessionID: claudeSID,
 		BoundBotID:      botID,
+		TotalCost:       r.TotalCost,
 		CreatedAt:       r.CreatedAt,
 		LastActiveAt:    r.LastActiveAt,
 	}

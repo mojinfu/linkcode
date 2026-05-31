@@ -29,14 +29,15 @@ var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b\]
 
 // Process wraps a running agent subprocess.
 type Process struct {
-	cmd              *exec.Cmd
-	stdin            io.WriteCloser
-	output           chan agent.OutputChunk
-	cancel           context.CancelFunc
-	mu               sync.Mutex
-	alive            bool
-	sessionID        string // sessionID passed to procman (for resume)
-	claudeSessionID  string // session_id extracted from claude's init message
+	cmd             *exec.Cmd
+	stdin           io.WriteCloser
+	output          chan agent.OutputChunk
+	cancel          context.CancelFunc
+	mu              sync.Mutex
+	alive           bool
+	diedAt          time.Time // when the process exited (set in waitForExit)
+	sessionID       string    // sessionID passed to procman (for resume)
+	claudeSessionID string    // session_id extracted from claude's init message
 }
 
 // Start launches a Claude Code subprocess with the given session ID.
@@ -55,6 +56,12 @@ func Start(ctx context.Context, claudePath, workDir, sessionID string) (*Process
 	args = append(args, "--output-format", "stream-json", "--input-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions")
 
 	cmd := exec.CommandContext(ctx, claudePath, args...)
+	cmd.Env = os.Environ()
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "ANTHROPIC") {
+			log.Printf("[procman] env: %s", e)
+		}
+	}
 	if workDir != "" {
 		if info, err := os.Stat(workDir); err != nil || !info.IsDir() {
 			log.Printf("[procman] workDir %q unavailable (%v), using current directory", workDir, err)
@@ -76,22 +83,31 @@ func Start(ctx context.Context, claudePath, workDir, sessionID string) (*Process
 		return nil, fmt.Errorf("procman: stdout pipe: %w", err)
 	}
 
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("procman: stderr pipe: %w", err)
+	}
+
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("procman: start %s: %w", claudePath, err)
 	}
 
 	p := &Process{
-		cmd:         cmd,
-		stdin:       stdin,
-		output:      make(chan agent.OutputChunk, 256),
-		cancel:      cancel,
-		alive:       true,
-		sessionID:   sessionID,
+		cmd:       cmd,
+		stdin:     stdin,
+		output:    make(chan agent.OutputChunk, 256),
+		cancel:    cancel,
+		alive:     true,
+		sessionID: sessionID,
 	}
 
-	go p.readOutput(stdout)
-	go p.waitForExit()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); p.readOutput(stdout) }()
+	go func() { defer wg.Done(); p.readStderr(stderr) }()
+	go p.waitForExit(&wg)
 
 	return p, nil
 }
@@ -135,24 +151,10 @@ func (p *Process) Stop() error {
 		_ = err
 	}
 
-	timeout := 5 * time.Second
-	done := make(chan error, 1)
-	go func() {
-		done <- p.cmd.Wait()
-	}()
-
-	select {
-	case <-time.After(timeout):
-		if killErr := p.cmd.Process.Kill(); killErr != nil {
-			return fmt.Errorf("procman: kill process: %w", killErr)
-		}
-	case err := <-done:
-		if err != nil {
-			return fmt.Errorf("procman: wait process: %w", err)
-		}
-	}
-
-	// Channel closed by readOutput goroutine when process exits.
+	// Let waitForExit be the sole caller of cmd.Wait() and the sole
+	// closer of p.output. Calling cmd.Wait() here races with waitForExit
+	// and on Windows causes undefined behavior (double-Wait is explicitly
+	// unsupported).
 	return nil
 }
 
@@ -171,13 +173,19 @@ func (p *Process) IsAlive() bool {
 	return p.alive
 }
 
+// DiedAt returns the time the process exited, or zero if still running.
+func (p *Process) DiedAt() time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.diedAt
+}
+
 // OutputChannel returns the raw output channel for the router to consume.
 func (p *Process) OutputChannel() <-chan agent.OutputChunk {
 	return p.output
 }
 
 func (p *Process) readOutput(stdout io.Reader) {
-	defer close(p.output)
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024) // 10MB max line
 
@@ -215,16 +223,34 @@ func (p *Process) readOutput(stdout io.Reader) {
 	}
 }
 
-func (p *Process) waitForExit() {
+func (p *Process) readStderr(stderr io.Reader) {
+	scanner := bufio.NewScanner(stderr)
+	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+		select {
+		case p.output <- agent.OutputChunk{
+			Kind:    agent.KindError,
+			Content: "[stderr] " + line,
+		}:
+		default:
+		}
+	}
+}
+
+func (p *Process) waitForExit(readersDone *sync.WaitGroup) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[procman] waitForExit panic recovered: %v", r)
 		}
-		p.mu.Lock()
-		p.alive = false
-		p.mu.Unlock()
 	}()
+
 	err := p.cmd.Wait()
+	readersDone.Wait() // ensure all stdout/stderr is consumed before closing channel
+
 	p.mu.Lock()
 	if p.alive && err != nil {
 		select {
@@ -235,7 +261,10 @@ func (p *Process) waitForExit() {
 		default:
 		}
 	}
+	p.alive = false
 	p.mu.Unlock()
+
+	close(p.output)
 }
 
 // claudeStreamJSON is the JSON format for Claude Code stream-json output.
@@ -243,12 +272,27 @@ func (p *Process) waitForExit() {
 // or:     {"type":"result","subtype":"success","result":"...","stop_reason":"end_turn"}
 // or:     {"type":"system","subtype":"init",...}
 type claudeStreamJSON struct {
-	Type    string              `json:"type"`
-	Subtype string              `json:"subtype"`
-	Result  string              `json:"result"`
-	Message *claudeStreamMsg    `json:"message"`
+	Type    string           `json:"type"`
+	Subtype string           `json:"subtype"`
+	Result  string           `json:"result"`
+	Message *claudeStreamMsg `json:"message"`
+	Usage   *claudeUsage     `json:"usage"`
+	// modelUsage maps model name → per-model usage breakdown.
+	ModelUsage map[string]claudeModelUsage `json:"modelUsage"`
 }
 
+type claudeUsage struct {
+	InputTokens          int `json:"input_tokens"`
+	OutputTokens         int `json:"output_tokens"`
+	CacheReadInputTokens int `json:"cache_read_input_tokens"`
+}
+
+type claudeModelUsage struct {
+	InputTokens          int     `json:"inputTokens"`
+	OutputTokens         int     `json:"outputTokens"`
+	CacheReadInputTokens int     `json:"cacheReadInputTokens"`
+	CostUSD              float64 `json:"costUSD"`
+}
 type claudeStreamMsg struct {
 	Content []claudeStreamContent `json:"content"`
 }
@@ -342,11 +386,48 @@ func parseOutputLine(line []byte) agent.OutputChunk {
 		}
 		return agent.OutputChunk{Kind: agent.KindThinking}
 	case "result":
+		tu := extractTokenUsage(raw)
 		if raw.Subtype == "error" || raw.Subtype == "error_during_execution" {
-			return agent.OutputChunk{Kind: agent.KindError, Content: stripANSI(raw.Result)}
+			return agent.OutputChunk{Kind: agent.KindError, Content: stripANSI(raw.Result), TokenUsage: tu}
 		}
-		return agent.OutputChunk{Kind: agent.KindFinal, Content: stripANSI(raw.Result)}
+		return agent.OutputChunk{Kind: agent.KindFinal, Content: stripANSI(raw.Result), TokenUsage: tu}
 	default:
 		return agent.OutputChunk{Kind: agent.KindText, Content: stripANSI(raw.Result)}
+	}
+}
+
+// extractTokenUsage pulls token usage from a claude stream-json result message.
+// It prefers modelUsage (per-model breakdown) for the model name; falls back to usage aggregate.
+func extractTokenUsage(raw claudeStreamJSON) *agent.TokenUsage {
+	if raw.Usage == nil && len(raw.ModelUsage) == 0 {
+		return nil
+	}
+
+	var model string
+	var inputTokens, outputTokens, cacheReadTokens int
+
+	if raw.Usage != nil {
+		inputTokens = raw.Usage.InputTokens
+		outputTokens = raw.Usage.OutputTokens
+		cacheReadTokens = raw.Usage.CacheReadInputTokens
+	}
+
+	if len(raw.ModelUsage) > 0 {
+		for m, mu := range raw.ModelUsage {
+			model = m
+			if mu.InputTokens > 0 || mu.OutputTokens > 0 {
+				inputTokens = mu.InputTokens
+				outputTokens = mu.OutputTokens
+				cacheReadTokens = mu.CacheReadInputTokens
+			}
+			break
+		}
+	}
+
+	return &agent.TokenUsage{
+		Model:           model,
+		InputTokens:     inputTokens,
+		OutputTokens:    outputTokens,
+		CacheReadTokens: cacheReadTokens,
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"os"
 	"time"
 
+	"linkcode/internal/pricing"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -33,10 +35,12 @@ type BotCredential struct {
 
 // AgentConfig holds agent-related settings.
 type AgentConfig struct {
-	DefaultType    string        `yaml:"default_type"`
-	IdleTimeout    time.Duration `yaml:"idle_timeout"`
-	ClaudeCodePath string `yaml:"claude_code_path"`
-	DefaultWorkDir string `yaml:"default_work_dir"`
+	DefaultType       string                     `yaml:"default_type"`
+	IdleTimeout       time.Duration              `yaml:"idle_timeout"`
+	ClaudeCodePath    string                     `yaml:"claude_code_path"`
+	DefaultWorkDir    string                     `yaml:"default_work_dir"`
+	DeepSeekProxyAddr string                     `yaml:"deepseek_proxy_addr"`
+	Pricing           map[string]pricing.ModelPricing `yaml:"pricing"`
 }
 
 // AdminConfig holds admin panel settings.
@@ -54,10 +58,11 @@ func DefaultConfig() Config {
 			MaxIdleConns: 5,
 		},
 		Agent: AgentConfig{
-			DefaultType:    "claude-code",
-			IdleTimeout:    30 * time.Minute,
-			ClaudeCodePath: "claude",
-			DefaultWorkDir: "",
+			DefaultType:       "claude-code",
+			IdleTimeout:       30 * time.Minute,
+			ClaudeCodePath:    "claude",
+			DefaultWorkDir:    "",
+			DeepSeekProxyAddr: "127.0.0.1:18981",
 		},
 		Admin: AdminConfig{
 			Enabled:  true,
@@ -91,6 +96,9 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("LINKCODE_ENCRYPT_KEY"); v != "" {
 		cfg.EncryptKey = v
+	}
+	if v := os.Getenv("LINKCODE_DEEPSEEK_PROXY_ADDR"); v != "" {
+		cfg.Agent.DeepSeekProxyAddr = v
 	}
 
 	// Fallback: load encryption key from local file if not in config.

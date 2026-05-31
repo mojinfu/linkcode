@@ -1,4 +1,4 @@
-﻿package router
+package router
 
 import (
 	"context"
@@ -80,6 +80,7 @@ func (r *Router) handleNew(msg channel.Message, sess *session.Session) {
 	delete(r.interruptedSessions, sess.ID)
 	delete(r.pendingMessages, sess.ID)
 	delete(r.thinkingStartedAt, sess.ID)
+	delete(r.sessionUsage, sess.ID)
 	r.mu.Unlock()
 	r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateSleeped})
 
@@ -272,19 +273,23 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 
 	var cache streamCache
 	streamBroken := false
+	hadContent := false
+	var turnCostUSD float64
 
 	streamTimeout := time.Duration(0)
 	if ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID); ok {
 		streamTimeout = ch.StreamTimeout()
 	}
 
+	processTimeout := time.After(10 * time.Minute)
+
 	buildStatusBar := func() string {
 		timeStr, warning := r.streamStatus(sess.ID, streamTimeout)
-	title := spinPrefix(spinnerRunes, spinnerIconIdx, spinnerDotIdx, "") + timeStr + " " + spinDots(spinnerDotIdx) + r.queueIndicator(sess.ID)
-	if warning != "" {
-		return r.styler.Box(title, warning)
-	}
-	return r.styler.Bar(title) + r.styler.DiffSuffix(spinnerDotIdx)
+		title := spinPrefix(spinnerRunes, spinnerIconIdx, spinnerDotIdx, "") + timeStr + " " + spinDots(spinnerDotIdx) + r.queueIndicator(sess.ID)
+		if warning != "" {
+			return r.styler.Box(title, warning)
+		}
+		return r.styler.Bar(title) + r.styler.DiffSuffix(spinnerDotIdx)
 	}
 
 	// Send initial spinner frame.
@@ -299,6 +304,7 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 			if !ok {
 				goto done
 			}
+			processTimeout = time.After(10 * time.Minute)
 			spinnerDotIdx++
 			log.Printf("[router] chunk kind=%s contentLen=%d", chunk.Kind, len(chunk.Content))
 			switch chunk.Kind {
@@ -308,6 +314,7 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 				r.sendStreamReply(msg, r.styler.Bar("[💫] error")+"\n"+chunk.Content, streamID, true)
 				return
 			case agent.KindText:
+				hadContent = true
 				cache.textBuf.WriteString(chunk.Content)
 				if !r.sendStreamReply(msg, buildStatusBar()+"\n"+cache.textBuf.String(), streamID, false) {
 					streamBroken = true
@@ -317,13 +324,44 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 			case agent.KindQuestion:
 				cache.question = chunk.Question
 			case agent.KindFinal:
+				hadContent = true
 				cache.fullResponse = chunk.Content
+				if chunk.TokenUsage != nil && chunk.TokenUsage.InputTokens > 0 {
+					r.mu.Lock()
+					u := r.sessionUsage[sess.ID]
+					if u == nil {
+						u = &sessionUsageRec{accCost: sess.TotalCost}
+						r.sessionUsage[sess.ID] = u
+					}
+					prevIn := u.inputTokens
+					prevOut := u.outputTokens
+					prevCache := u.cacheReadTokens
+					u.inputTokens += chunk.TokenUsage.InputTokens
+					u.outputTokens += chunk.TokenUsage.OutputTokens
+					u.cacheReadTokens += chunk.TokenUsage.CacheReadTokens
+					if chunk.TokenUsage.Model != "" {
+						u.model = chunk.TokenUsage.Model
+					}
+					turnCost := r.pricingCalc.Cost(u.model, u.inputTokens-prevIn, u.cacheReadTokens-prevCache, u.outputTokens-prevOut)
+					u.accCost += turnCost
+					turnCostUSD = turnCost
+					r.mu.Unlock()
+					_ = r.sessionMgr.SetCost(sess.ID, u.accCost)
+				}
 			case agent.KindThinking, agent.KindToolUse:
 				if chunk.Content != "" {
 					spinnerInterval = spinnerMinInterval
 					ticker.Reset(spinnerInterval)
 				}
 			}
+		case <-processTimeout:
+			if streamBroken {
+				continue
+			}
+			// Warn the user but don't force-kill — the user decides whether to /stop.
+			r.sendStreamReply(msg, r.styler.Bar("[⏰] 超时")+"\nAgent 已运行 10 分钟仍未结束，如需终止请回复 /stop", streamID, false)
+			processTimeout = time.After(10 * time.Minute)
+
 		case <-ticker.C:
 			if streamBroken {
 				continue
@@ -362,17 +400,26 @@ done:
 		return
 	}
 
+	if !hadContent {
+		r.statusMgr.Send(StatusEvent{SessionID: sess.ID, State: StateDizzy})
+		doneText := r.styler.Bar("[💫] 无响应") + "\nAgent 进程异常退出，请稍后重试"
+		r.sendStreamReply(msg, doneText, streamID, true)
+		return
+	}
+
 	responseText := cache.textBuf.String()
 	if responseText == "" {
 		responseText = cache.fullResponse
 	}
+
+	costLine := r.buildCostLine(sess.ID, turnCostUSD)
 
 	if streamBroken {
 		if responseText != "" {
 			ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
 			if ok && ch.IsConnected() {
 				prefix := quotePrefix(r.styler, msg.Content, 30)
-				doneText := r.styler.Bar("[✓] stand by") + "\n\n" + prefix + "\n" + responseText
+				doneText := r.styler.Bar("[✓] stand by"+costLine) + "\n\n" + prefix + "\n" + responseText
 				ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
 					Text:   doneText,
 					ChatID: msg.ChatID,
@@ -388,7 +435,7 @@ done:
 			r.sendQuestionMenu(msg, cache.question)
 		}
 	} else {
-		doneText := r.styler.Bar("[✓] stand by") + "\n\n" + responseText
+		doneText := r.styler.Bar("[✓] stand by"+costLine) + "\n\n" + responseText
 		r.sendStreamReply(msg, doneText, streamID, true)
 
 		if cache.question != nil {
@@ -402,6 +449,24 @@ done:
 	if responseText != "" {
 		_ = r.sessionMgr.AddMessage(sess.ID, "agent", responseText, "text")
 	}
+}
+
+// buildCostLine returns a cost display string for the standby bar.
+// prevCost is the cumulative cost before this turn, turnCost is this turn's cost.
+// Returns empty string if no cost data is available.
+func (r *Router) buildCostLine(sessionID int64, turnCostUSD float64) string {
+	r.mu.Lock()
+	u := r.sessionUsage[sessionID]
+	r.mu.Unlock()
+	if u == nil {
+		return ""
+	}
+	if u.accCost <= 0 {
+		return ""
+	}
+	prevCost := u.accCost - turnCostUSD
+	symbol := r.pricingCalc.Symbol(u.model)
+	return ", " + r.styler.Cost(prevCost, turnCostUSD, symbol)
 }
 
 // getOrCreateAgentSession resumes or starts an agent session for the given LinkCode session.

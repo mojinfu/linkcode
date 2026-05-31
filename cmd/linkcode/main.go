@@ -26,6 +26,8 @@ import (
 	"linkcode/internal/controller"
 	"linkcode/internal/crypto"
 	"linkcode/internal/gateway"
+	"linkcode/internal/pricing"
+	"linkcode/internal/proxy"
 	"linkcode/internal/router"
 	"linkcode/internal/session"
 	"linkcode/internal/store"
@@ -137,7 +139,37 @@ func main() {
 			log.Fatalf("add work_dir column: %v", err)
 		}
 	}
+	migrationV3, err := os.ReadFile("migrations/003_total_cost.sql")
+	if err != nil {
+		log.Fatalf("read migration 003: %v", err)
+	}
+	if err := db.RunMigrations(string(migrationV3)); err != nil {
+		if strings.Contains(err.Error(), "Duplicate column") {
+			log.Printf("migration note: total_cost column already exists, skipped")
+		} else {
+			log.Fatalf("run migration 003: %v", err)
+		}
+	}
 	log.Println("migrations applied")
+
+	// Start DeepSeek API proxy if needed.
+	// Claude Code puts system prompt as "role":"system" in messages array,
+	// which DeepSeek's Anthropic-compatible endpoint rejects.
+	deepseekURL := os.Getenv("ANTHROPIC_BASE_URL")
+	if strings.Contains(strings.ToLower(deepseekURL), "deepseek") {
+		proxyAddr := cfg.Agent.DeepSeekProxyAddr
+		proxySrv := proxy.New(proxyAddr, deepseekURL)
+		go func() {
+			if err := proxySrv.Start(); err != nil {
+				log.Fatalf("[main] DeepSeek proxy on %s: %v", proxyAddr, err)
+			}
+		}()
+		// Wait for the proxy to be ready before proceeding.
+		<-proxySrv.Ready()
+		// Override the env var so all Claude Code subprocesses route through the proxy.
+		os.Setenv("ANTHROPIC_BASE_URL", "http://"+proxyAddr)
+		log.Printf("[main] DeepSeek proxy ready on %s -> %s", proxyAddr, deepseekURL)
+	}
 
 	// Initialize layers.
 	botPool := botpool.New(db, cfg.EncryptKey, cfg.Agent.DefaultWorkDir)
@@ -152,9 +184,10 @@ func main() {
 	gw := gateway.New(ctrlChan)
 
 	// Initialize controller and router.
+	priceCalc := pricing.New(cfg.Agent.Pricing)
 	statusMgr := router.NewStatusManager(gw, sessionMgr)
-	ctrl := controller.New(sessionMgr, botPool, gw, imStyler)
-	rtr := router.New(sessionMgr, botPool, agentRunner, gw, statusMgr, imStyler)
+	rtr := router.New(sessionMgr, botPool, agentRunner, gw, statusMgr, imStyler, priceCalc)
+	ctrl := controller.New(sessionMgr, botPool, gw, imStyler, cfg.Agent.ClaudeCodePath, rtr, rtr)
 
 	// Wire worker bot handlers globally via gateway.
 	gw.SetWorkerMessageHandler(func(msg channel.Message) {
@@ -217,7 +250,7 @@ func main() {
 
 	// Start admin panel.
 	if cfg.Admin.Enabled {
-		adminSrv := admin.New(cfg.Admin.BindAddr, sessionMgr, botPool)
+		adminSrv := admin.New(cfg.Admin.BindAddr, sessionMgr, botPool, rtr)
 		go func() {
 			log.Printf("admin panel: http://%s", cfg.Admin.BindAddr)
 			if err := adminSrv.Start(); err != nil {

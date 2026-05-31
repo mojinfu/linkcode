@@ -11,19 +11,26 @@ import (
 	"linkcode/internal/session"
 )
 
+// CostInfo provides cumulative cost and token usage for sessions.
+type CostInfo interface {
+	SessionUsage(sessionID int64) (inputTokens, outputTokens int, costUSD float64, known bool)
+}
+
 // Server serves the admin web UI.
 type Server struct {
 	bindAddr   string
 	sessionMgr *session.Manager
 	botPool    *botpool.Pool
+	costInfo   CostInfo
 }
 
 // New creates a new admin server.
-func New(bindAddr string, sessMgr *session.Manager, pool *botpool.Pool) *Server {
+func New(bindAddr string, sessMgr *session.Manager, pool *botpool.Pool, costInfo CostInfo) *Server {
 	return &Server{
 		bindAddr:   bindAddr,
 		sessionMgr: sessMgr,
 		botPool:    pool,
+		costInfo:   costInfo,
 	}
 }
 
@@ -39,9 +46,22 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	sessions, _ := s.sessionMgr.ListActive()
 	bots, _ := s.botPool.List()
 
+	costDisplay := make(map[int64]string)
+	if s.costInfo != nil {
+		for _, sess := range sessions {
+			_, _, cost, known := s.costInfo.SessionUsage(sess.ID)
+			if known && cost > 0 {
+				costDisplay[sess.ID] = fmt.Sprintf("$%.2f", cost)
+			} else if !known && cost > 0 {
+				costDisplay[sess.ID] = "?"
+			}
+		}
+	}
+
 	page := pageData{
-		Sessions: sessions,
-		Bots:     bots,
+		Sessions:    sessions,
+		Bots:        bots,
+		CostDisplay: costDisplay,
 	}
 
 	tmpl := template.Must(template.New("admin").Parse(adminHTML))
@@ -68,10 +88,10 @@ func (s *Server) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := map[string]interface{}{
-		"session_count": len(sessions),
-		"bot_total":     len(bots),
-		"bot_idle":      idle,
-		"bot_bound":     bound,
+		"session_count":   len(sessions),
+		"bot_total":       len(bots),
+		"bot_idle":        idle,
+		"bot_bound":       bound,
 		"bot_unavailable": unavail,
 	}
 
@@ -80,8 +100,9 @@ func (s *Server) handleAPIStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 type pageData struct {
-	Sessions []session.Session
-	Bots     []botpool.Bot
+	Sessions    []session.Session
+	Bots        []botpool.Bot
+	CostDisplay map[int64]string
 }
 
 const adminHTML = `<!DOCTYPE html>
@@ -110,13 +131,14 @@ const adminHTML = `<!DOCTYPE html>
 <div class="card">
   <h2>活跃 Session ({{len .Sessions}})</h2>
   <table>
-    <tr><th>ID</th><th>名称</th><th>类型</th><th>状态</th><th>最后活跃</th></tr>
+    <tr><th>ID</th><th>名称</th><th>类型</th><th>状态</th><th>消耗</th><th>最后活跃</th></tr>
     {{range .Sessions}}
     <tr>
       <td>{{.ID}}</td>
       <td>{{.Name}}</td>
       <td>{{.AgentType}}</td>
       <td><span class="badge badge-{{.ProcessStatus}}">{{.ProcessStatus}}</span></td>
+      <td>{{index $.CostDisplay .ID}}</td>
       <td>{{.LastActiveAt.Format "15:04:05"}}</td>
     </tr>
     {{end}}
