@@ -128,8 +128,11 @@ func (r *Router) HandleWorkerEvent(msg channel.Message) {
 	wd, _ := r.botPool.ResolveWorkDir(botWD)
 
 	ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
-		Text: fmt.Sprintf("你好，我是你的 %s「%s」\n工作目录：%s\n发送 %s 查看可用命令。",
-			displayAgentType(sess.AgentType), sess.Name, wd, r.styler.Bold("/help")),
+		Text: fmt.Sprintf("你好，我是你的 %s「%s」\n\n%s\n%s\n\n发送 %s 查看可用命令。",
+			displayAgentType(sess.AgentType), sess.Name,
+			r.styler.Bold("工作目录"),
+			r.styler.Box("path", wd),
+			r.styler.Bold("/help")),
 	})
 }
 

@@ -23,6 +23,18 @@ agent:
   idle_timeout: 30m
   claude_code_path: "claude"       # path to claude CLI binary
   claude_work_dir: ""              # empty = current working directory
+  # Model pricing (per million tokens). Used for per-session cost display.
+  pricing:
+    deepseek-v4-flash:
+      cache_hit_input: 0.02
+      cache_miss_input: 1.0
+      output: 2.0
+      symbol: "¥"
+    deepseek-v4-pro:
+      cache_hit_input: 0.025
+      cache_miss_input: 3.0
+      output: 6.0
+      symbol: "¥"
 
 # Local admin web panel.
 admin:
