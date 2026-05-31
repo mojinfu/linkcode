@@ -1,4 +1,4 @@
-﻿// Package wecom implements the channel.Channel interface for 企业微信 AI Bot.
+// Package wecom implements the channel.Channel interface for 企业微信 AI Bot.
 //
 // Protocol reference:
 //
