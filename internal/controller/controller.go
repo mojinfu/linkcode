@@ -288,8 +288,11 @@ func (c *Controller) handleCreateAgentType(ctx context.Context, userID, text str
 	}
 
 	b := c.styler.Bold
-	welcome := fmt.Sprintf("你好，我是你的 %s「%s」\n工作目录：%s\n发送 %s 查看可用命令。",
-		agentTypeDisplay(agentType), name, wd, b("/help"))
+	welcome := fmt.Sprintf("你好，我是你的 %s「%s」\n\n%s\n%s\n\n发送 %s 查看可用命令。",
+		agentTypeDisplay(agentType), name,
+		c.styler.Bold("工作目录"),
+		c.styler.Box("path", wd),
+		b("/help"))
 	if err := workerCh.SendMessage(ctx, userID, channel.MessageContent{
 		Text:   welcome,
 		ChatID: userID,
@@ -350,8 +353,11 @@ func (c *Controller) handleAddBot(userID, text string) string {
 	}
 
 	b := c.styler.Bold
-	welcome := fmt.Sprintf("你好，我是你的 %s「%s」\n工作目录：%s\n发送 %s 查看可用命令。",
-		agentTypeDisplay(agentType), name, wd, b("/help"))
+	welcome := fmt.Sprintf("你好，我是你的 %s「%s」\n\n%s\n%s\n\n发送 %s 查看可用命令。",
+		agentTypeDisplay(agentType), name,
+		c.styler.Bold("工作目录"),
+		c.styler.Box("path", wd),
+		b("/help"))
 	if err := workerCh.SendMessage(ctx, userID, channel.MessageContent{
 		Text:   welcome,
 		ChatID: userID,

@@ -105,16 +105,21 @@ func (r *Router) handleNew(msg channel.Message, sess *session.Session) {
 	if bot != nil {
 		botWD = bot.WorkDir
 	}
-	wd, source := r.botPool.ResolveWorkDir(botWD)
+	wd, _ := r.botPool.ResolveWorkDir(botWD)
 
 	var welcome string
 	claudeSid := sess.ClaudeSessionID
 	b := r.styler.Bold
 	if hadClaudeSession {
-		welcome = fmt.Sprintf("对话已重置。\n旧 Claude Session：%s\n新 LinkCode Session：%s（Claude Session 将在下条消息时创建）\n\n工作目录：%s（%s）\n开始新的对话吧！",
-			b(claudeSid), b(fmt.Sprintf("%d", newSess.ID)), wd, source)
+		welcome = fmt.Sprintf("对话已重置。\n旧 Claude Session：%s\n新 LinkCode Session：%s（Claude Session 将在下条消息时创建）\n\n%s\n%s\n开始新的对话吧！",
+			b(claudeSid), b(fmt.Sprintf("%d", newSess.ID)),
+			r.styler.Bold("工作目录"),
+			r.styler.Box("path", wd))
 	} else {
-		welcome = fmt.Sprintf("你好，我是你的 Agent「%s」，有什么任务要交给我吗？\n工作目录：%s（%s）\n发送 %s 查看可用命令。", sess.Name, wd, source, b("/help"))
+		welcome = fmt.Sprintf("你好，我是你的 Agent「%s」，有什么任务要交给我吗？\n\n%s\n%s\n\n发送 %s 查看可用命令。", sess.Name,
+			r.styler.Bold("工作目录"),
+			r.styler.Box("path", wd),
+			b("/help"))
 	}
 	r.sendReply(msg, welcome)
 
