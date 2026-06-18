@@ -18,48 +18,55 @@ SHELL := D:/apps/git/Git/bin/sh.exe
 .SHELLFLAGS := -c
 
 # 自动检测 pwsh / powershell
-PW := $(shell command -v pwsh 2>/dev/null || command -v powershell 2>/dev/null || echo powershell)
+# 用裸名(pwsh/powershell),让 GnuWin32 make 的 CreateProcess 走 Windows PATH 解析;
+# 不能用 command -v 的输出——那会返回 MSYS 路径 /c/Windows/...,原生 make 直执行时找不到。
+PW := $(shell if command -v pwsh >/dev/null 2>&1; then echo pwsh; else echo powershell; fi)
 
 .PHONY: build run restart stop status clean
 
 build:
-	$(PW) make.ps1 build
+	$(PW) -File make.ps1 build
 
 run:
-	$(PW) make.ps1 run
+	$(PW) -File make.ps1 run
 
 restart:
-	$(PW) make.ps1 restart
+	$(PW) -File make.ps1 restart
 
 daemon:
-	$(PW) make.ps1 restart -daemon
+	$(PW) -File make.ps1 restart -daemon
 	@echo ""
 	@echo "后台运行中。查看日志:"
 	@echo "  tail -f \$$TEMP/linkcode.log"
 	@echo "  make status"
 
 run-daemon:
-	$(PW) make.ps1 run -daemon
+	$(PW) -File make.ps1 run -daemon
 	@echo ""
 	@echo "后台运行中。查看日志:"
 	@echo "  tail -f \$$TEMP/linkcode.log"
 	@echo "  make status"
 
 restart-daemon:
-	$(PW) make.ps1 restart -daemon
+	$(PW) -File make.ps1 restart -daemon
 	@echo ""
 	@echo "后台运行中。查看日志:"
 	@echo "  tail -f \$$TEMP/linkcode.log"
 	@echo "  make status"
 
+# 短别名:make restart-d / make run-d(等价于 -daemon 版本)。
+# 注意:不能用 "make restart -d"——-d 是 make 内置 debug 开关,会被 make 吞掉且不透传。
+restart-d: restart-daemon
+run-d: run-daemon
+
 stop:
-	$(PW) make.ps1 stop
+	$(PW) -File make.ps1 stop
 
 status:
-	$(PW) make.ps1 status
+	$(PW) -File make.ps1 status
 
 clean:
-	$(PW) make.ps1 clean
+	$(PW) -File make.ps1 clean
 
 help:
 	@echo "linkcode make targets:"
@@ -69,6 +76,8 @@ help:
 	@echo "  make restart         前台重启，不编译"
 	@echo "  make restart -daemon 后台重启，不编译"
 	@echo "  make restart-daemon  后台重启，不编译（快捷方式）"
+	@echo "  make restart-d       后台重启，不编译（-d 短别名）"
+	@echo "  make run-d           编译 + 后台启动（-d 短别名）"
 	@echo "  make daemon          后台重启，不编译"
 	@echo "  make build           仅编译"
 	@echo "  make stop            停止"
