@@ -28,11 +28,6 @@ var zwspSuffixes = [...]string{
 	"​​​",
 	"​​​​",
 	"​​​​​",
-	"​​​​​​",
-	"​​​​​​​",
-	"​​​​​​​​",
-	"​​​​​​​​​",
-	"​​​​​​​​​​",
 }
 
 func (WeComStyler) DiffSuffix(seq int) string {

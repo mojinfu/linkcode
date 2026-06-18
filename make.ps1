@@ -2,35 +2,43 @@
 <#
 .SYNOPSIS
 Cross-platform build/run helper for linkcode.
-Usage: ./make.ps1 [build|run|stop|restart|status|clean]
+Usage: ./make.ps1 [build|run|restart|stop|status|clean] [-daemon]
+
+Targets:
+  build    编译
+  run      编译 + 重启（kill 旧进程 → 编译 → 启动）
+  restart  仅重启  （kill 旧进程 → 启动，不编译）
+  stop     停止
+  status   查看状态
+  clean    清理编译产物
+
+Options:
+  -daemon  后台运行（默认前台，可直接 Ctrl+C 停止）
 #>
 
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("build", "run", "stop", "restart", "status", "clean")]
-    [string]$Target = "build"
+    [ValidateSet("build", "run", "restart", "stop", "status", "clean")]
+    [string]$Target = "build",
+
+    [switch]$Daemon
 )
 
 $ErrorActionPreference = "Stop"
 
-# --- platform detection ---
-if (Test-Path Variable:IsWindows) {
-    # PowerShell Core / 7+
-    $IsWin = $IsWindows
-} else {
-    # Windows PowerShell 5.1
-    $IsWin = $true
-}
+# --- helpers ---
+function Write-Step($Msg) { Write-Host ">>> $Msg" -ForegroundColor Cyan }
+function Write-OK($Msg)   { Write-Host "  [OK] $Msg" -ForegroundColor Green }
+function Write-Warn($Msg) { Write-Host "  [WARN] $Msg" -ForegroundColor Yellow }
+function Write-Err($Msg)  { Write-Host "  [ERROR] $Msg" -ForegroundColor Red }
 
 # --- paths ---
-$Binary  = if ($IsWin) { "bin/linkcode.exe" } else { "bin/linkcode" }
+$Binary  = "bin/linkcode.exe"
 $Config  = "configs/linkcode.yaml"
-$Log     = if ($IsWin) { Join-Path $env:TEMP "linkcode.log" } else { "/tmp/linkcode.log" }
+$LogDir  = if ($env:TEMP) { $env:TEMP } else { "/tmp" }
+$StdoutLog = Join-Path $LogDir "linkcode-stdout.log"
+$StderrLog = Join-Path $LogDir "linkcode.log"
 $PidFile = "bin/.linkcode.pid"
-
-# ============================================================================
-# helpers
-# ============================================================================
 
 function Ensure-BinDir {
     $dir = Split-Path $Binary -Parent
@@ -52,8 +60,6 @@ function Test-ProcessAlive($Id) {
     catch { return $false }
 }
 
-function Write-Step($Msg) { Write-Host ">>> $Msg" -ForegroundColor Cyan }
-
 # ============================================================================
 # targets
 # ============================================================================
@@ -61,41 +67,20 @@ function Write-Step($Msg) { Write-Host ">>> $Msg" -ForegroundColor Cyan }
 function Invoke-Build {
     Write-Step "Building..."
     Ensure-BinDir
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
     go build -o $Binary ./cmd/linkcode/
-    Write-Host "  $Binary" -ForegroundColor Green
-}
-
-function Invoke-Run {
-    Invoke-Stop
-    Invoke-Build
-
-    Write-Step "Starting linkcode..."
-
-    if (Test-Path $PidFile) {
-        $stale = Get-Content $PidFile -Raw
-        Write-Host "  WARNING: stale pid file found (pid $stale), removing." -ForegroundColor Yellow
-        Remove-Item $PidFile -Force
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "build failed"
+        exit $LASTEXITCODE
     }
-
-    $stdoutLog = if ($IsWin) { Join-Path $env:TEMP "linkcode-stdout.log" } else { $Log }
-    $proc = Start-Process -FilePath $Binary -ArgumentList "-config", $Config `
-        -WindowStyle Hidden -PassThru `
-        -RedirectStandardOutput $stdoutLog -RedirectStandardError $Log
-
-    Start-Sleep -Seconds 2
-
-    if ($proc.HasExited) {
-        Write-Host "  ERROR: linkcode exited immediately (code $($proc.ExitCode))." -ForegroundColor Red
-        return
-    }
-
-    $proc.Id | Out-File -FilePath $PidFile -NoNewline
-    Write-Host "  Started (pid $($proc.Id)). Log: $Log" -ForegroundColor Green
+    Write-OK "$Binary ($($sw.Elapsed.TotalSeconds.ToString('0.0'))s)"
 }
 
 function Invoke-Stop {
-    Write-Step "Stopping linkcode..."
+    Write-Step "Stopping..."
+    $killed = $false
 
+    # 1. Kill by PID file.
     $procId = Get-PidFromFile
     if ($procId -and (Test-ProcessAlive $procId)) {
         Write-Host "  Killing pid $procId..."
@@ -107,29 +92,92 @@ function Invoke-Stop {
             $timeout--
         }
         if (Test-ProcessAlive $procId) {
-            Write-Host "  Process did not stop gracefully, forcing..." -ForegroundColor Yellow
+            Write-Warn "Process did not stop gracefully, forcing..."
             Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
         }
-        Write-Host "  Stopped." -ForegroundColor Green
+        $killed = $true
     } elseif ($procId) {
-        Write-Host "  Stale pid file (pid $procId), cleaning up." -ForegroundColor Yellow
+        Write-Warn "Stale pid file (pid $procId), cleaning up."
     } else {
-        Write-Host "  No pid file found." -ForegroundColor Gray
+        Write-Host "  No pid file found."
     }
 
-    # Fallback: kill any leftover linkcode processes
+    # 2. Fallback: kill any leftover linkcode processes by name.
     $leftovers = Get-Process -Name "linkcode" -ErrorAction SilentlyContinue
     if ($leftovers) {
         $leftovers | Stop-Process -Force -ErrorAction SilentlyContinue
-        Write-Host "  Cleaned up leftover linkcode process(es)." -ForegroundColor Yellow
+        $killed = $true
+        Write-OK "Cleaned up $($leftovers.Count) leftover process(es)."
     }
 
     Remove-Item -Force -ErrorAction SilentlyContinue $PidFile
+
+    if ($killed) { Write-OK "Stopped." }
+    else         { Write-Host "  Already stopped." -ForegroundColor Gray }
+}
+
+function Invoke-Start {
+    Write-Step "Starting ($(if ($Daemon) { 'daemon' } else { 'foreground' }))..."
+    Ensure-BinDir
+
+    if (-not (Test-Path $Binary)) {
+        Write-Err "$Binary not found — build first: make build"
+        exit 1
+    }
+    if (-not (Test-Path $Config)) {
+        Write-Err "$Config not found"
+        exit 1
+    }
+
+    # Clean stale pid file.
+    if (Test-Path $PidFile) {
+        $stale = Get-Content $PidFile -Raw
+        Write-Warn "Stale pid file found (pid $stale), removing."
+        Remove-Item $PidFile -Force
+    }
+
+    if ($Daemon) {
+        # --- daemon mode: detached background process ---
+        $proc = Start-Process -FilePath $Binary `
+            -ArgumentList "-config", $Config `
+            -WindowStyle Hidden -PassThru `
+            -RedirectStandardOutput $StdoutLog -RedirectStandardError $StderrLog
+
+        Start-Sleep -Seconds 3
+
+        if ($proc.HasExited) {
+            Write-Err "linkcode exited immediately (code $($proc.ExitCode))."
+            Write-Host "  Stderr tail:" -ForegroundColor Yellow
+            if (Test-Path $StderrLog) {
+                Get-Content $StderrLog -Tail 15 | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+            }
+            exit 1
+        }
+
+        $proc.Id | Out-File -FilePath $PidFile -NoNewline
+        Write-OK "Started (pid $($proc.Id))."
+        Write-Host "  stdout: $StdoutLog" -ForegroundColor Gray
+        Write-Host "  stderr: $StderrLog" -ForegroundColor Gray
+        Write-Host "  admin:  http://127.0.0.1:18980" -ForegroundColor Gray
+    }
+    else {
+        # --- foreground mode: logs to console, Ctrl+C to stop ---
+        Write-Host "  Running in foreground. Press Ctrl+C to stop." -ForegroundColor Gray
+        Write-Host "  admin: http://127.0.0.1:18980" -ForegroundColor Gray
+        Write-Host ""
+        & $Binary -config $Config
+    }
+}
+
+function Invoke-Run {
+    Invoke-Stop
+    Invoke-Build
+    Invoke-Start
 }
 
 function Invoke-Restart {
-    # run and restart share the same logic: stop → build → start
-    Invoke-Run
+    Invoke-Stop
+    Invoke-Start
 }
 
 function Invoke-Status {
@@ -139,6 +187,7 @@ function Invoke-Status {
         $proc = Get-Process -Id $procId
         Write-Host "  StartTime : $($proc.StartTime)"
         Write-Host "  CPU       : $([math]::Round($proc.TotalProcessorTime.TotalSeconds, 1))s"
+        Write-Host "  Memory    : $([math]::Round($proc.WorkingSet64 / 1MB, 1)) MB"
     } elseif ($procId) {
         Write-Host "Not running (stale pid file for $procId)." -ForegroundColor Yellow
         Remove-Item -Force -ErrorAction SilentlyContinue $PidFile
@@ -151,8 +200,9 @@ function Invoke-Clean {
     Write-Step "Cleaning..."
     Remove-Item -Force -ErrorAction SilentlyContinue $Binary
     Remove-Item -Force -ErrorAction SilentlyContinue $PidFile
-    if ($IsWin) { Remove-Item -Force -ErrorAction SilentlyContinue $Log }
-    Write-Host "  Done." -ForegroundColor Green
+    Remove-Item -Force -ErrorAction SilentlyContinue $StdoutLog
+    Remove-Item -Force -ErrorAction SilentlyContinue $StderrLog
+    Write-OK "Done."
 }
 
 # ============================================================================
@@ -162,8 +212,8 @@ function Invoke-Clean {
 switch ($Target) {
     "build"   { Invoke-Build }
     "run"     { Invoke-Run }
-    "stop"    { Invoke-Stop }
     "restart" { Invoke-Restart }
+    "stop"    { Invoke-Stop }
     "status"  { Invoke-Status }
     "clean"   { Invoke-Clean }
 }

@@ -15,15 +15,17 @@ import (
 // Runner manages Claude Code sessions via the CLI.
 type Runner struct {
 	claudePath string
+	env        map[string]string
 
 	mu       sync.Mutex
 	sessions map[string]*Session // linkCodeSessionID -> running session
 }
 
 // NewRunner creates a new Claude Code runner.
-func NewRunner(claudePath string) *Runner {
+func NewRunner(claudePath string, env map[string]string) *Runner {
 	return &Runner{
 		claudePath: claudePath,
+		env:        env,
 		sessions:   make(map[string]*Session),
 	}
 }
@@ -53,7 +55,7 @@ func (r *Runner) Start(ctx context.Context, linkCodeSessionID, workDir string) (
 		delete(r.sessions, linkCodeSessionID)
 	}
 
-	proc, err := procman.Start(ctx, r.claudePath, workDir, "")
+	proc, err := procman.Start(ctx, r.claudePath, workDir, "", r.env)
 	if err != nil {
 		return nil, fmt.Errorf("claude: start: %w", err)
 	}
@@ -87,7 +89,7 @@ func (r *Runner) Resume(ctx context.Context, linkCodeSessionID, claudeSessionID,
 		delete(r.sessions, linkCodeSessionID)
 	}
 
-	proc, err := procman.Start(ctx, r.claudePath, workDir, claudeSessionID)
+	proc, err := procman.Start(ctx, r.claudePath, workDir, claudeSessionID, r.env)
 	if err != nil {
 		return nil, fmt.Errorf("claude: resume: %w", err)
 	}

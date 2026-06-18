@@ -197,7 +197,7 @@ func TestStart_NewSession_SessionIDIsNonEmpty(t *testing.T) {
 	defer cancel()
 
 	// Start a new session (empty sessionID).
-	proc, err := Start(ctx, claudePath, "", "")
+	proc, err := Start(ctx, claudePath, "", "", nil)
 	if err != nil {
 		t.Fatalf("Start() failed: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestStart_ResumeSession_SessionIDReturnsPassedID(t *testing.T) {
 	defer cancel()
 
 	resumeID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-	proc, err := Start(ctx, claudePath, "", resumeID)
+	proc, err := Start(ctx, claudePath, "", resumeID, nil)
 	if err != nil {
 		t.Fatalf("Start() with resume ID failed: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestStart_SendAndReceive(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	proc, err := Start(ctx, claudePath, "", "")
+	proc, err := Start(ctx, claudePath, "", "", nil)
 	if err != nil {
 		t.Fatalf("Start() failed: %v", err)
 	}
@@ -374,7 +374,7 @@ func TestStart_ErrorThenSuccess(t *testing.T) {
 	ctx1, cancel1 := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel1()
 
-	proc1, err := Start(ctx1, fakeBin, dir, "")
+	proc1, err := Start(ctx1, fakeBin, dir, "", nil)
 	if err != nil {
 		t.Fatalf("first Start() failed: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestStart_ErrorThenSuccess(t *testing.T) {
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel2()
 
-	proc2, err := Start(ctx2, fakeBin, dir, "")
+	proc2, err := Start(ctx2, fakeBin, dir, "", nil)
 	if err != nil {
 		t.Fatalf("second Start() failed: %v", err)
 	}
@@ -460,7 +460,7 @@ func TestStart_NonJSONOutput(t *testing.T) {
 	ctx1, cancel1 := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel1()
 
-	proc1, err := Start(ctx1, fakeBin, dir, "")
+	proc1, err := Start(ctx1, fakeBin, dir, "", nil)
 	if err != nil {
 		t.Fatalf("first Start() failed: %v", err)
 	}
@@ -501,7 +501,7 @@ func TestStart_NonJSONOutput(t *testing.T) {
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel2()
 
-	proc2, err := Start(ctx2, fakeBin, dir, "")
+	proc2, err := Start(ctx2, fakeBin, dir, "", nil)
 	if err != nil {
 		t.Fatalf("second Start() failed: %v", err)
 	}
@@ -554,7 +554,7 @@ func TestStart_SilentKill(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	proc, err := Start(ctx, fakeBin, dir, "")
+	proc, err := Start(ctx, fakeBin, dir, "", nil)
 	if err != nil {
 		t.Fatalf("Start() failed: %v", err)
 	}
@@ -615,7 +615,7 @@ func TestStart_ChannelCloseRace(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	proc, err := Start(ctx, fakeBin, dir, "")
+	proc, err := Start(ctx, fakeBin, dir, "", nil)
 	if err != nil {
 		t.Fatalf("Start() failed: %v", err)
 	}
@@ -677,7 +677,7 @@ func TestStart_TextThenError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	proc, err := Start(ctx, fakeBin, dir, "")
+	proc, err := Start(ctx, fakeBin, dir, "", nil)
 	if err != nil {
 		t.Fatalf("Start() failed: %v", err)
 	}
@@ -730,7 +730,7 @@ func TestStart_SlowStream(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	proc, err := Start(ctx, fakeBin, dir, "")
+	proc, err := Start(ctx, fakeBin, dir, "", nil)
 	if err != nil {
 		t.Fatalf("Start() failed: %v", err)
 	}
@@ -791,7 +791,7 @@ func TestStart_StderrOnly(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	proc, err := Start(ctx, fakeBin, dir, "")
+	proc, err := Start(ctx, fakeBin, dir, "", nil)
 	if err != nil {
 		t.Fatalf("Start() failed: %v", err)
 	}
@@ -847,7 +847,7 @@ func TestStart_InstantExitNoOutput(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	proc, err := Start(ctx, fakeBin, dir, "")
+	proc, err := Start(ctx, fakeBin, dir, "", nil)
 	if err != nil {
 		t.Fatalf("Start() failed: %v", err)
 	}
@@ -903,7 +903,7 @@ func TestStart_LargeOutput(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	proc, err := Start(ctx, fakeBin, dir, "")
+	proc, err := Start(ctx, fakeBin, dir, "", nil)
 	if err != nil {
 		t.Fatalf("Start() failed: %v", err)
 	}
@@ -970,7 +970,7 @@ func TestStart_LargeOutput(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		proc, err := Start(ctx, fakeBin, dir, "")
+		proc, err := Start(ctx, fakeBin, dir, "", nil)
 		if err != nil {
 			t.Fatalf("Start() failed: %v", err)
 		}

@@ -53,6 +53,7 @@ type Router struct {
 	pendingQuestions    map[int64]*agent.Question   // sessionID -> pending question
 	interruptedSessions map[int64]bool              // sessionID -> process was /stop'd
 	pendingMessages     map[int64][]channel.Message // sessionID -> queued messages while process is busy
+	pendingFragments    map[int64][]string          // sessionID -> buffered "still speaking" fragments, joined on next non-continuation message
 	thinkingStartedAt   map[int64]time.Time         // sessionID -> when the current thinking started
 	sessionUsage        map[int64]*sessionUsageRec  // sessionID -> cumulative token usage
 	pricingCalc         pricing.Calculator
@@ -80,6 +81,7 @@ func New(sessMgr *session.Manager, pool *botpool.Pool, runner agent.Runner, gw *
 		pendingQuestions:    make(map[int64]*agent.Question),
 		interruptedSessions: make(map[int64]bool),
 		pendingMessages:     make(map[int64][]channel.Message),
+		pendingFragments:    make(map[int64][]string),
 		thinkingStartedAt:   make(map[int64]time.Time),
 		sessionUsage:        make(map[int64]*sessionUsageRec),
 	}
@@ -160,6 +162,12 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 	case msgKindCommand:
 		r.handleCommand(msg, sess)
 	default:
+		finalContent, buffering := r.collectFragments(sess.ID, msg.Content)
+		if buffering {
+			r.sendReply(msg, "请继续，我接着听")
+			return
+		}
+		msg.Content = finalContent
 		r.handleLLM(msg, sess)
 	}
 }
@@ -182,6 +190,43 @@ func classifyMessage(msg channel.Message) msgKind {
 		return msgKindCommand
 	}
 	return msgKindText
+}
+
+// continuationPhrases 列出表示"用户还没说完"的结尾短语；命中则该条消息暂存、不发给 Claude。
+var continuationPhrases = []string{
+	"我接着说", "我来接着说", "我继续说", "我来继续说", "我还没说完",
+}
+
+// endsWithContinuation 判断消息（去首尾空白后）是否以续说短语结尾。
+// 严格匹配：短语后不能有任何字符（含标点）；短语前可有正文。
+func endsWithContinuation(content string) bool {
+	s := strings.TrimSpace(content)
+	for _, p := range continuationPhrases {
+		if strings.HasSuffix(s, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// collectFragments 处理"还没说完"的暂存与拼接。
+// 命中续说短语 -> 追加暂存，返回 ("", true)，调用方应回复提示且不进 Claude。
+// 否则 -> 将已暂存片段与本条按换行拼齐、清空暂存，返回 (拼接内容, false)。
+func (r *Router) collectFragments(sessionID int64, content string) (finalContent string, buffering bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if endsWithContinuation(content) {
+		r.pendingFragments[sessionID] = append(r.pendingFragments[sessionID], content)
+		return "", true
+	}
+
+	frags := r.pendingFragments[sessionID]
+	if len(frags) == 0 {
+		return content, false
+	}
+	delete(r.pendingFragments, sessionID)
+	return strings.Join(append(frags, content), "\n"), false
 }
 
 // stream JSON helpers

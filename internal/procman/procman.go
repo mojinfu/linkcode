@@ -27,6 +27,10 @@ import (
 // Bare ESC: ESC followed by a single byte (not [ or ])
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b\][^\x1b]*\x1b\\|\x1b[^\[].`)
 
+// claudeEnvKeys 列出 claude 子进程启动所依赖的关键环境变量。
+// LogClaudeEnv 会在 linkcode 启动时报告它们的来源，便于排查"启动 claude 失败"。
+var claudeEnvKeys = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"}
+
 // Process wraps a running agent subprocess.
 type Process struct {
 	cmd             *exec.Cmd
@@ -43,7 +47,7 @@ type Process struct {
 // Start launches a Claude Code subprocess with the given session ID.
 // If sessionID is empty, a new session is created with a generated UUID.
 // If sessionID is non-empty, it is used with --resume to continue an existing session.
-func Start(ctx context.Context, claudePath, workDir, sessionID string) (*Process, error) {
+func Start(ctx context.Context, claudePath, workDir, sessionID string, extraEnv map[string]string) (*Process, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	args := []string{"-p"}
@@ -57,6 +61,20 @@ func Start(ctx context.Context, claudePath, workDir, sessionID string) (*Process
 
 	cmd := exec.CommandContext(ctx, claudePath, args...)
 	cmd.Env = os.Environ()
+	for k, v := range extraEnv {
+		prefix := k + "="
+		found := false
+		for i, e := range cmd.Env {
+			if strings.HasPrefix(e, prefix) {
+				cmd.Env[i] = prefix + v
+				found = true
+				break
+			}
+		}
+		if !found {
+			cmd.Env = append(cmd.Env, prefix+v)
+		}
+	}
 	for _, e := range cmd.Env {
 		if strings.HasPrefix(e, "ANTHROPIC") {
 			log.Printf("[procman] env: %s", e)
@@ -110,6 +128,41 @@ func Start(ctx context.Context, claudePath, workDir, sessionID string) (*Process
 	go p.waitForExit(&wg)
 
 	return p, nil
+}
+
+// envSource 表示一个关键环境变量的最终来源。
+type envSource int
+
+const (
+	envFromFile envSource = iota // 来自文件配置 (agent.env)
+	envFromSystem                // 来自系统环境变量
+	envMissing                   // 文件与系统均未设置
+)
+
+// classifyEnv 按优先级判断一个环境变量的来源：文件配置(非空) > 系统环境变量(非空) > 缺失。
+func classifyEnv(key string, fileEnv map[string]string) envSource {
+	if v, ok := fileEnv[key]; ok && v != "" {
+		return envFromFile
+	}
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		return envFromSystem
+	}
+	return envMissing
+}
+
+// LogClaudeEnv 在 linkcode 启动时报告 claude 子进程关键环境变量的来源，
+// 便于排查"启动 claude 失败"。实际注入仍由 Start 完成（os.Environ + extraEnv 覆盖）。
+func LogClaudeEnv(fileEnv map[string]string) {
+	for _, k := range claudeEnvKeys {
+		switch classifyEnv(k, fileEnv) {
+		case envFromFile:
+			log.Printf("[procman] %s: from file config (agent.env)", k)
+		case envFromSystem:
+			log.Printf("[procman] %s: from system env", k)
+		case envMissing:
+			log.Printf("[procman] WARNING: %s not set (neither agent.env nor system env) — claude subprocess may fail to start", k)
+		}
+	}
 }
 
 // Send writes input to the agent's stdin and closes stdin to signal end of input.
