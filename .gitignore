@@ -28,9 +28,13 @@ Thumbs.db
 # Personal / local docs
 CLAUDE.md
 Q&A.md
+LOCAL_SETUP.md
 项目介绍.md
 linkcodelogo.png
 cmd/streamtest/
+
+# Local scripts (MySQL etc.)
+scripts/start-mysql.ps1
 
 # Config secrets
 configs/.encrypt_key

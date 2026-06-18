@@ -41,6 +41,7 @@ type AgentConfig struct {
 	DefaultWorkDir    string                     `yaml:"default_work_dir"`
 	DeepSeekProxyAddr string                     `yaml:"deepseek_proxy_addr"`
 	Pricing           map[string]pricing.ModelPricing `yaml:"pricing"`
+	Env               map[string]string               `yaml:"env"`
 }
 
 // AdminConfig holds admin panel settings.

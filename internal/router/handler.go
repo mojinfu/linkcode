@@ -79,6 +79,7 @@ func (r *Router) handleNew(msg channel.Message, sess *session.Session) {
 	delete(r.pendingQuestions, sess.ID)
 	delete(r.interruptedSessions, sess.ID)
 	delete(r.pendingMessages, sess.ID)
+	delete(r.pendingFragments, sess.ID)
 	delete(r.thinkingStartedAt, sess.ID)
 	delete(r.sessionUsage, sess.ID)
 	r.mu.Unlock()
@@ -348,6 +349,7 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 					r.mu.Unlock()
 					_ = r.sessionMgr.SetCost(sess.ID, u.accCost)
 				}
+				goto done // final=success: ignore subsequent non-zero exit chunk (e.g. BigModel compat)
 			case agent.KindThinking, agent.KindToolUse:
 				if chunk.Content != "" {
 					spinnerInterval = spinnerMinInterval

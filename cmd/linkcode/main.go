@@ -174,7 +174,7 @@ func main() {
 	// Initialize layers.
 	botPool := botpool.New(db, cfg.EncryptKey, cfg.Agent.DefaultWorkDir)
 	sessionMgr := session.New(db)
-	agentRunner := claude.NewRunner(cfg.Agent.ClaudeCodePath)
+	agentRunner := claude.NewRunner(cfg.Agent.ClaudeCodePath, cfg.Agent.Env)
 	imStyler := wecom.WeComStyler{}
 
 	// Create control bot channel.

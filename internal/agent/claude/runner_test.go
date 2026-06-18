@@ -35,7 +35,7 @@ func TestRunner_AutoCleanupAfterSend(t *testing.T) {
 
 	dir := t.TempDir()
 	fakeBin := buildFakeClaude(t, dir, "fakeclaude")
-	runner := NewRunner(fakeBin)
+	runner := NewRunner(fakeBin, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -103,7 +103,7 @@ func TestRunner_AutoCleanupAfterCrash(t *testing.T) {
 		t.Fatalf("build fakeclaude_texterr: %v\n%s", err, out)
 	}
 
-	runner := NewRunner(fakeBinTexterr)
+	runner := NewRunner(fakeBinTexterr, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -168,7 +168,7 @@ func TestRunner_StopCleansUp(t *testing.T) {
 
 	dir := t.TempDir()
 	fakeBin := buildFakeClaude(t, dir, "fakeclaude")
-	runner := NewRunner(fakeBin)
+	runner := NewRunner(fakeBin, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -209,7 +209,7 @@ func TestRunner_RapidRestartDelay(t *testing.T) {
 
 	dir := t.TempDir()
 	fakeBin := buildFakeClaude(t, dir, "fakeclaude")
-	runner := NewRunner(fakeBin)
+	runner := NewRunner(fakeBin, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -284,7 +284,7 @@ func TestRunner_SessionNotInMapAfterAutoCleanup(t *testing.T) {
 
 	dir := t.TempDir()
 	fakeBin := buildFakeClaude(t, dir, "fakeclaude")
-	runner := NewRunner(fakeBin)
+	runner := NewRunner(fakeBin, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -336,7 +336,7 @@ func TestRunner_InterruptRemovesSession(t *testing.T) {
 
 	dir := t.TempDir()
 	fakeBin := buildFakeClaude(t, dir, "fakeclaude")
-	runner := NewRunner(fakeBin)
+	runner := NewRunner(fakeBin, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -387,7 +387,7 @@ func TestRunner_ErrBusyOnAliveSession(t *testing.T) {
 		t.Fatalf("build fakeclaude_hang: %v\n%s", err, out)
 	}
 
-	runner := NewRunner(fakeBinHang)
+	runner := NewRunner(fakeBinHang, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -430,7 +430,7 @@ func TestRunner_InterruptBusySessionThenResume(t *testing.T) {
 		t.Fatalf("build fakeclaude_hang: %v\n%s", err, out)
 	}
 
-	runner := NewRunner(fakeBinHang)
+	runner := NewRunner(fakeBinHang, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -483,7 +483,7 @@ func TestRunner_ProcessStatusGap_TwoBotsAfterExit(t *testing.T) {
 
 	dir := t.TempDir()
 	fakeBin := buildFakeClaude(t, dir, "fakeclaude")
-	runner := NewRunner(fakeBin)
+	runner := NewRunner(fakeBin, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -576,7 +576,7 @@ func TestRunner_ProcessStatusGap_StopKeepsWaked(t *testing.T) {
 		t.Fatalf("build fakeclaude_hang: %v\n%s", err, out)
 	}
 
-	runner := NewRunner(fakeBinHang)
+	runner := NewRunner(fakeBinHang, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

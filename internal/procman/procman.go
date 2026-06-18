@@ -43,7 +43,7 @@ type Process struct {
 // Start launches a Claude Code subprocess with the given session ID.
 // If sessionID is empty, a new session is created with a generated UUID.
 // If sessionID is non-empty, it is used with --resume to continue an existing session.
-func Start(ctx context.Context, claudePath, workDir, sessionID string) (*Process, error) {
+func Start(ctx context.Context, claudePath, workDir, sessionID string, extraEnv map[string]string) (*Process, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	args := []string{"-p"}
@@ -57,6 +57,20 @@ func Start(ctx context.Context, claudePath, workDir, sessionID string) (*Process
 
 	cmd := exec.CommandContext(ctx, claudePath, args...)
 	cmd.Env = os.Environ()
+	for k, v := range extraEnv {
+		prefix := k + "="
+		found := false
+		for i, e := range cmd.Env {
+			if strings.HasPrefix(e, prefix) {
+				cmd.Env[i] = prefix + v
+				found = true
+				break
+			}
+		}
+		if !found {
+			cmd.Env = append(cmd.Env, prefix+v)
+		}
+	}
 	for _, e := range cmd.Env {
 		if strings.HasPrefix(e, "ANTHROPIC") {
 			log.Printf("[procman] env: %s", e)
