@@ -112,19 +112,6 @@ function Invoke-Stop {
 
     Remove-Item -Force -ErrorAction SilentlyContinue $PidFile
 
-    # 3. Wait for ports to be released (avoids bind errors on restart).
-    $ports = @(18981)  # DeepSeek proxy
-    foreach ($port in $ports) {
-        $wait = 10  # max 5 seconds
-        while ($wait -gt 0) {
-            $inUse = netstat -ano 2>$null | Select-String ":$port " | Select-String "LISTENING"
-            if (-not $inUse) { break }
-            Start-Sleep -Milliseconds 500
-            $wait--
-        }
-        if ($wait -eq 0) { Write-Warn "Port $port still in use, may cause bind error." }
-    }
-
     if ($killed) { Write-OK "Stopped." }
     else         { Write-Host "  Already stopped." -ForegroundColor Gray }
 }

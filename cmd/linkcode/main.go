@@ -27,7 +27,7 @@ import (
 	"linkcode/internal/crypto"
 	"linkcode/internal/gateway"
 	"linkcode/internal/pricing"
-	"linkcode/internal/proxy"
+	"linkcode/internal/procman"
 	"linkcode/internal/router"
 	"linkcode/internal/session"
 	"linkcode/internal/store"
@@ -152,24 +152,8 @@ func main() {
 	}
 	log.Println("migrations applied")
 
-	// Start DeepSeek API proxy if needed.
-	// Claude Code puts system prompt as "role":"system" in messages array,
-	// which DeepSeek's Anthropic-compatible endpoint rejects.
-	deepseekURL := os.Getenv("ANTHROPIC_BASE_URL")
-	if strings.Contains(strings.ToLower(deepseekURL), "deepseek") {
-		proxyAddr := cfg.Agent.DeepSeekProxyAddr
-		proxySrv := proxy.New(proxyAddr, deepseekURL)
-		go func() {
-			if err := proxySrv.Start(); err != nil {
-				log.Fatalf("[main] DeepSeek proxy on %s: %v", proxyAddr, err)
-			}
-		}()
-		// Wait for the proxy to be ready before proceeding.
-		<-proxySrv.Ready()
-		// Override the env var so all Claude Code subprocesses route through the proxy.
-		os.Setenv("ANTHROPIC_BASE_URL", "http://"+proxyAddr)
-		log.Printf("[main] DeepSeek proxy ready on %s -> %s", proxyAddr, deepseekURL)
-	}
+	// Report claude subprocess auth/endpoint env sources (file config > system env > missing).
+	procman.LogClaudeEnv(cfg.Agent.Env)
 
 	// Initialize layers.
 	botPool := botpool.New(db, cfg.EncryptKey, cfg.Agent.DefaultWorkDir)
