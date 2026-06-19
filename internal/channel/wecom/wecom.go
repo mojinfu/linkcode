@@ -12,9 +12,13 @@ package wecom
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -287,6 +291,175 @@ func (c *Channel) sendProactive(userID string, content channel.MessageContent) e
 		c.ackMu.Unlock()
 		return fmt.Errorf("wecom: ack timeout for proactive message %s", reqID)
 	}
+}
+
+// SendImage implements channel.Channel. It uploads the image via the chunked
+// temporary-material API over the long connection, then replies with it via
+// aibot_respond_msg. reqID must be a recent incoming message's request ID —
+// WeCom does NOT allow images to be pushed proactively, only sent as a reply.
+// Ref: https://developer.work.weixin.qq.com/document/path/101463 (上传临时素材, 图片消息)
+func (c *Channel) SendImage(ctx context.Context, userID, reqID, imagePath string) error {
+	if reqID == "" {
+		return fmt.Errorf("wecom: SendImage requires reqID of a user message to reply to")
+	}
+	data, err := os.ReadFile(imagePath)
+	if err != nil {
+		return fmt.Errorf("read image %s: %w", imagePath, err)
+	}
+	if err := validateImage(imagePath, data); err != nil {
+		return err
+	}
+	mediaID, err := c.uploadMedia(filepath.Base(imagePath), data)
+	if err != nil {
+		return err
+	}
+	return c.sendImageReply(reqID, mediaID)
+}
+
+// uploadMedia uploads image data via the chunked temporary-material API and
+// returns the resulting media_id (valid for 3 days). The whole exchange runs
+// over the existing WebSocket long connection — no access_token needed.
+func (c *Channel) uploadMedia(filename string, data []byte) (string, error) {
+	const chunkSize = 512 * 1024 // per WeCom: each chunk ≤512KB BEFORE base64
+	total := len(data)
+	totalChunks := total / chunkSize
+	if total%chunkSize != 0 {
+		totalChunks++
+	}
+	md5sum := fmt.Sprintf("%x", md5.Sum(data))
+
+	// 1. init -> upload_id
+	initResp, err := c.sendCmdWait(c.nextReqID(), "aibot_upload_media_init", map[string]interface{}{
+		"type": "image", "filename": filename,
+		"total_size": total, "total_chunks": totalChunks, "md5": md5sum,
+	})
+	if err != nil {
+		return "", fmt.Errorf("upload init: %w", err)
+	}
+	var initRes struct {
+		UploadID string `json:"upload_id"`
+	}
+	if err := json.Unmarshal(initResp, &initRes); err != nil || initRes.UploadID == "" {
+		return "", fmt.Errorf("upload init: bad response %s: %v", string(initResp), err)
+	}
+	uploadID := initRes.UploadID
+
+	// 2. chunks (index from 0; may be uploaded out of order, idempotent)
+	for i := 0; i < totalChunks; i++ {
+		start := i * chunkSize
+		end := start + chunkSize
+		if end > total {
+			end = total
+		}
+		if _, err := c.sendCmdWait(c.nextReqID(), "aibot_upload_media_chunk", map[string]interface{}{
+			"upload_id":   uploadID,
+			"chunk_index": i,
+			"base64_data": base64.StdEncoding.EncodeToString(data[start:end]),
+		}); err != nil {
+			return "", fmt.Errorf("upload chunk %d: %w", i, err)
+		}
+	}
+
+	// 3. finish -> media_id
+	finResp, err := c.sendCmdWait(c.nextReqID(), "aibot_upload_media_finish", map[string]interface{}{
+		"upload_id": uploadID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("upload finish: %w", err)
+	}
+	var finRes struct {
+		MediaID string `json:"media_id"`
+	}
+	if err := json.Unmarshal(finResp, &finRes); err != nil || finRes.MediaID == "" {
+		return "", fmt.Errorf("upload finish: bad response %s: %v", string(finResp), err)
+	}
+	return finRes.MediaID, nil
+}
+
+// sendImageReply sends an aibot_respond_msg with msgtype=image, replying to the
+// message identified by reqID. Like sendReply, it does not wait for an ack.
+func (c *Channel) sendImageReply(reqID, mediaID string) error {
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
+	if !c.connected || c.conn == nil {
+		return fmt.Errorf("wecom: not connected")
+	}
+	resp := wecomEnvelope{
+		Cmd:     "aibot_respond_msg",
+		Headers: wecomHeaders{ReqID: reqID},
+		Body: json.RawMessage(mustMarshal(wecomRespondMsg{
+			MsgType: "image",
+			Image:   &wecomSendImage{MediaID: mediaID},
+		})),
+	}
+	if err := c.conn.WriteJSON(resp); err != nil {
+		c.markBrokenLocked()
+		return err
+	}
+	return nil
+}
+
+// sendCmdWait sends a command that expects a response body (e.g. media upload)
+// and blocks until the ack arrives, then returns the response body. It reuses
+// the pendingAcks mechanism; the body is pulled from uploadResps, where
+// dispatchAck stores every response, and cleaned up after reading.
+func (c *Channel) sendCmdWait(reqID, cmd string, body interface{}) (json.RawMessage, error) {
+	c.connMu.Lock()
+	if !c.connected || c.conn == nil {
+		c.connMu.Unlock()
+		return nil, fmt.Errorf("wecom: not connected")
+	}
+
+	ackCh := make(chan error, 1)
+	c.ackMu.Lock()
+	c.pendingAcks[reqID] = ackCh
+	c.ackMu.Unlock()
+
+	env := wecomEnvelope{
+		Cmd:     cmd,
+		Headers: wecomHeaders{ReqID: reqID},
+		Body:    json.RawMessage(mustMarshal(body)),
+	}
+	if err := c.conn.WriteJSON(env); err != nil {
+		c.markBrokenLocked()
+		c.connMu.Unlock()
+		c.ackMu.Lock()
+		delete(c.pendingAcks, reqID)
+		c.ackMu.Unlock()
+		return nil, fmt.Errorf("wecom: write %s: %w", cmd, err)
+	}
+	c.connMu.Unlock()
+
+	select {
+	case err := <-ackCh:
+		if err != nil {
+			return nil, err
+		}
+		c.uploadMu.Lock()
+		respBody := c.uploadResps[reqID]
+		delete(c.uploadResps, reqID)
+		c.uploadMu.Unlock()
+		return respBody, nil
+	case <-time.After(ackTimeout):
+		c.ackMu.Lock()
+		delete(c.pendingAcks, reqID)
+		c.ackMu.Unlock()
+		return nil, fmt.Errorf("wecom: ack timeout for %s %s", cmd, reqID)
+	}
+}
+
+// validateImage checks the file extension and size against WeCom limits.
+func validateImage(path string, data []byte) error {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".png", ".jpg", ".jpeg", ".gif":
+	default:
+		return fmt.Errorf("wecom: unsupported image type %q (png/jpg/jpeg/gif only)", ext)
+	}
+	if len(data) > 10*1024*1024 {
+		return fmt.Errorf("wecom: image too large: %d bytes (max 10MB)", len(data))
+	}
+	return nil
 }
 
 func (c *Channel) dispatchAck(env wecomEnvelope) {
@@ -759,8 +932,15 @@ type wecomEvent struct {
 }
 
 type wecomRespondMsg struct {
-	MsgType string      `json:"msgtype"`
-	Stream  wecomStream `json:"stream,omitempty"`
+	MsgType string          `json:"msgtype"`
+	Stream  wecomStream     `json:"stream,omitempty"`
+	Image   *wecomSendImage `json:"image,omitempty"`
+}
+
+// wecomSendImage is the image payload for an aibot_respond_msg reply.
+// media_id is obtained from the chunked upload (aibot_upload_media_*).
+type wecomSendImage struct {
+	MediaID string `json:"media_id"`
 }
 
 type wecomStream struct {

@@ -1,4 +1,4 @@
-﻿// Package controller implements the main control bot's menu-based interaction logic.
+// Package controller implements the main control bot's menu-based interaction logic.
 package controller
 
 import (
@@ -21,7 +21,7 @@ import (
 type MenuState int
 
 const (
-	MenuNone             MenuState = iota
+	MenuNone MenuState = iota
 	MenuMain
 	MenuCreateAgentName   // waiting for agent name
 	MenuCreateAgentBotID  // waiting for bot ID
@@ -41,9 +41,9 @@ type listSessionItem struct {
 type userState struct {
 	state        MenuState
 	updatedAt    time.Time
-	tmpAgentName string // agent name being created
-	tmpBotID     string // platform bot ID being created
-	tmpSecret    string // decrypted secret being created
+	tmpAgentName string            // agent name being created
+	tmpBotID     string            // platform bot ID being created
+	tmpSecret    string            // decrypted secret being created
 	listSessions []listSessionItem // cached for reconnect
 }
 
@@ -60,29 +60,27 @@ type CostInfo interface {
 
 // Controller orchestrates the main control bot.
 type Controller struct {
-	sessionMgr    *session.Manager
-	botPool       *botpool.Pool
-	gw            *gateway.Gateway
-	styler        channel.Styler
-	claudeCodePath string // path to claude CLI, used by /restart
-	queueInfo     QueueInfo
-	costInfo      CostInfo
+	sessionMgr *session.Manager
+	botPool    *botpool.Pool
+	gw         *gateway.Gateway
+	styler     channel.Styler
+	queueInfo  QueueInfo
+	costInfo   CostInfo
 
 	mu         sync.Mutex
 	userStates map[string]*userState
 }
 
 // New creates a new Controller.
-func New(sessMgr *session.Manager, pool *botpool.Pool, gw *gateway.Gateway, styler channel.Styler, claudeCodePath string, queueInfo QueueInfo, costInfo CostInfo) *Controller {
+func New(sessMgr *session.Manager, pool *botpool.Pool, gw *gateway.Gateway, styler channel.Styler, queueInfo QueueInfo, costInfo CostInfo) *Controller {
 	return &Controller{
-		sessionMgr:    sessMgr,
-		botPool:       pool,
-		gw:            gw,
-		styler:        styler,
-		claudeCodePath: claudeCodePath,
-		queueInfo:     queueInfo,
-		costInfo:      costInfo,
-		userStates:    make(map[string]*userState),
+		sessionMgr: sessMgr,
+		botPool:    pool,
+		gw:         gw,
+		styler:     styler,
+		queueInfo:  queueInfo,
+		costInfo:   costInfo,
+		userStates: make(map[string]*userState),
 	}
 }
 
@@ -583,9 +581,16 @@ func (c *Controller) handleListChoice(ctx context.Context, userID, text string) 
 	return c.styler.Box("Agent 列表", fmt.Sprintf("「%s」已重连成功！\n\n回复其他数字重连其他 Agent，或回复 0 返回菜单。", item.name))
 }
 
-// handleRestart delegates the restart to Claude Code.
-// Claude knows the project layout and OS conventions — it runs the restart
-// command (make.ps1 restart) while linkcode exits immediately.
+// handleRestart reboots linkcode via make.ps1. It spawns a fully detached
+// PowerShell process that sleeps briefly (so this process can exit and release
+// its pid/port) and then runs `make.ps1 restart -daemon`, which stops the old
+// instance and starts a fresh one in the background.
+//
+// This replaced an older "spawn claude to run the restart" approach that was
+// unreliable on Windows: linkcode exited right after spawning claude, and the
+// claude child was usually killed along with it (or lacked the env it needed),
+// so the restart never actually happened. Detaching via Start-Process and
+// running make.ps1 directly avoids all of that.
 func (c *Controller) handleRestart(ctx context.Context, msg channel.Message) string {
 	ctrlChan := c.gw.ControlChannel()
 	if ctrlChan != nil {
@@ -596,21 +601,20 @@ func (c *Controller) handleRestart(ctx context.Context, msg channel.Message) str
 		})
 	}
 
-	log.Printf("[controller] restart: spawning claude to handle restart")
-	cmd := exec.Command(c.claudeCodePath, "-p",
-		"请重启 linkcode 服务。项目根目录有 make.ps1 脚本，运行 `powershell -File make.ps1 restart` 即可完成重启。重启完成后退出。",
-		"--permission-mode", "bypassPermissions",
-		"--output-format", "text")
-
+	// Detached grandchild: sleep 1s (let this instance exit), then restart.
+	// Start-Process makes it independent of linkcode's lifetime.
+	restartScript := "Start-Sleep -Seconds 1; powershell -File make.ps1 restart -daemon"
+	cmd := exec.Command("powershell", "-NoProfile", "-Command",
+		"Start-Process -FilePath powershell -ArgumentList '-NoProfile','-Command','"+restartScript+"' -WindowStyle Hidden")
 	if err := cmd.Start(); err != nil {
-		log.Printf("[controller] restart: spawn claude failed: %v", err)
+		log.Printf("[controller] restart: spawn detached failed: %v", err)
 		return fmt.Sprintf("启动重启进程失败：%v", err)
 	}
+	// Don't wait on the outer launcher — it exits immediately after Start-Process.
+	_ = cmd.Process.Release()
 
-	log.Printf("[controller] restart: claude pid %d spawned, exiting linkcode", cmd.Process.Pid)
-	go cmd.Wait()
-
-	time.Sleep(200 * time.Millisecond)
+	log.Printf("[controller] restart: detached restart scheduled, exiting linkcode (pid %d)", os.Getpid())
+	time.Sleep(500 * time.Millisecond) // give Start-Process time to actually launch
 	os.Exit(0)
 	return "" // unreachable
 }

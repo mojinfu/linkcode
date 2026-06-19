@@ -24,13 +24,32 @@ import (
 const (
 	// spinnerFrames defines the 8-frame Braille spinner sequence.
 	spinnerFrames = "⣷⣯⣟⡿⢿⣻⣽⣾"
-	// spinnerMinInterval is the fastest spin rate, used when tokens are flowing.
-	spinnerMinInterval = 200 * time.Millisecond
-	// spinnerMaxInterval is the slowest spin rate, used when idle.
-	spinnerMaxInterval = 1 * time.Second
-	// spinnerDecelStep is how much the interval grows per tick without a chunk.
-	spinnerDecelStep = 200 * time.Millisecond
 )
+
+// idleRefreshSchedule controls the cadence of spinner refresh frames sent to
+// WeCom while the agent is idle/thinking. It starts fast (0.5s — responsive feel
+// right after the user sends a message) and progressively slows down (1s, then
+// 4.7s) to keep the refresh rate under WeCom's 30-msgs/min limit during long
+// thinking periods. That way the final `finish` frame ([✓] stand by) lands in
+// the sparse tail and isn't rejected as 846607 — which is what made the standby
+// checkmark sometimes fail to show after a long thinking.
+// The schedule loops: after the slow tail it returns to the fast start, keeping
+// the cadence lively. One full loop is 30 frames / ~62s ≈ 29/min — and any 60s
+// sliding window holds at most 29 frames, under WeCom's 30-msgs/min limit.
+// Composition: 0.5s ×10, 1s ×10, 4.7s ×10.
+var idleRefreshSchedule = func() []time.Duration {
+	var s []time.Duration
+	for i := 0; i < 10; i++ {
+		s = append(s, 500*time.Millisecond)
+	}
+	for i := 0; i < 10; i++ {
+		s = append(s, 1*time.Second)
+	}
+	for i := 0; i < 10; i++ {
+		s = append(s, 4700*time.Millisecond)
+	}
+	return s
+}()
 
 // streamCache holds the important parts of a streaming reply so that
 // on stream failure the content can be resent as a regular (non-stream) message.
@@ -56,6 +75,7 @@ type Router struct {
 	pendingFragments    map[int64][]string          // sessionID -> buffered "still speaking" fragments, joined on next non-continuation message
 	thinkingStartedAt   map[int64]time.Time         // sessionID -> when the current thinking started
 	sessionUsage        map[int64]*sessionUsageRec  // sessionID -> cumulative token usage
+	pendingImageChoices map[int64][]string          // sessionID -> fuzzy-matched image candidates awaiting a numeric pick
 	pricingCalc         pricing.Calculator
 }
 
@@ -64,8 +84,8 @@ type sessionUsageRec struct {
 	inputTokens     int
 	outputTokens    int
 	cacheReadTokens int
-	model           string // last used model
-	accCost float64 // accumulated calculated cost
+	model           string  // last used model
+	accCost         float64 // accumulated calculated cost
 }
 
 // New creates a new Router.
@@ -84,6 +104,7 @@ func New(sessMgr *session.Manager, pool *botpool.Pool, runner agent.Runner, gw *
 		pendingFragments:    make(map[int64][]string),
 		thinkingStartedAt:   make(map[int64]time.Time),
 		sessionUsage:        make(map[int64]*sessionUsageRec),
+		pendingImageChoices: make(map[int64][]string),
 	}
 }
 
@@ -162,6 +183,9 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 	case msgKindCommand:
 		r.handleCommand(msg, sess)
 	default:
+		if r.consumeImageChoice(msg, sess) {
+			return
+		}
 		finalContent, buffering := r.collectFragments(sess.ID, msg.Content)
 		if buffering {
 			r.sendReply(msg, "请继续，我接着听")
@@ -176,7 +200,7 @@ func (r *Router) HandleWorkerMessage(msg channel.Message) {
 type msgKind int
 
 const (
-	msgKindText    msgKind = iota
+	msgKindText msgKind = iota
 	msgKindCommand
 	msgKindVoice
 )
@@ -193,16 +217,19 @@ func classifyMessage(msg channel.Message) msgKind {
 }
 
 // continuationPhrases 列出表示"用户还没说完"的结尾短语；命中则该条消息暂存、不发给 Claude。
+// 英文短语不区分大小写（见 endsWithContinuation）。
 var continuationPhrases = []string{
 	"我接着说", "我来接着说", "我继续说", "我来继续说", "我还没说完",
+	"not done yet", "more to come",
 }
 
 // endsWithContinuation 判断消息（去首尾空白后）是否以续说短语结尾。
 // 严格匹配：短语后不能有任何字符（含标点）；短语前可有正文。
+// 英文短语不区分大小写（中文不受影响）。
 func endsWithContinuation(content string) bool {
-	s := strings.TrimSpace(content)
+	s := strings.ToLower(strings.TrimSpace(content))
 	for _, p := range continuationPhrases {
-		if strings.HasSuffix(s, p) {
+		if strings.HasSuffix(s, strings.ToLower(p)) {
 			return true
 		}
 	}
@@ -237,15 +264,15 @@ type streamJSONUserMsg struct {
 }
 
 type streamJSONMsgBody struct {
-	Role    string                 `json:"role"`
+	Role    string                  `json:"role"`
 	Content []streamJSONContentPart `json:"content"`
 }
 
 type streamJSONContentPart struct {
-	Type       string `json:"type"`
-	Text       string `json:"text,omitempty"`
-	ToolUseID  string `json:"tool_use_id,omitempty"`
-	Content    string `json:"content,omitempty"`
+	Type      string `json:"type"`
+	Text      string `json:"text,omitempty"`
+	ToolUseID string `json:"tool_use_id,omitempty"`
+	Content   string `json:"content,omitempty"`
 }
 
 // buildTextInput formats a plain text message as a stream-json line.
@@ -341,7 +368,7 @@ func (r *Router) sendQuestionMenu(msg channel.Message, q *agent.Question) {
 func quotePrefix(styler channel.Styler, text string, n int) string {
 	runes := []rune(text)
 	if len(runes) > n {
-		return styler.Quote(string(runes[:n]) + "...") + "\n"
+		return styler.Quote(string(runes[:n])+"...") + "\n"
 	}
 	return styler.Quote(text) + "\n"
 }

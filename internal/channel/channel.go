@@ -60,6 +60,13 @@ type Channel interface {
 	// SendMessage sends a message to a specific user.
 	SendMessage(ctx context.Context, userID string, content MessageContent) error
 
+	// SendImage sends an image file as a reply to the message identified by reqID.
+	// reqID must be the request ID of a message the user sent to this bot
+	// recently (WeCom: within 24h) — WeCom does NOT allow images to be pushed
+	// proactively, only sent as a reply. Platforms that don't support images
+	// should return an error.
+	SendImage(ctx context.Context, userID, reqID, imagePath string) error
+
 	// OnMessage registers a handler for incoming user messages.
 	OnMessage(handler MessageHandler)
 
