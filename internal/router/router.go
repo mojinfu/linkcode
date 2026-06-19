@@ -214,16 +214,19 @@ func classifyMessage(msg channel.Message) msgKind {
 }
 
 // continuationPhrases 列出表示"用户还没说完"的结尾短语；命中则该条消息暂存、不发给 Claude。
+// 英文短语不区分大小写（见 endsWithContinuation）。
 var continuationPhrases = []string{
 	"我接着说", "我来接着说", "我继续说", "我来继续说", "我还没说完",
+	"not done yet", "more to come",
 }
 
 // endsWithContinuation 判断消息（去首尾空白后）是否以续说短语结尾。
 // 严格匹配：短语后不能有任何字符（含标点）；短语前可有正文。
+// 英文短语不区分大小写（中文不受影响）。
 func endsWithContinuation(content string) bool {
-	s := strings.TrimSpace(content)
+	s := strings.ToLower(strings.TrimSpace(content))
 	for _, p := range continuationPhrases {
-		if strings.HasSuffix(s, p) {
+		if strings.HasSuffix(s, strings.ToLower(p)) {
 			return true
 		}
 	}
