@@ -201,9 +201,18 @@ func (r *Router) handleSendImage(msg channel.Message, sess *session.Session) {
 		r.sendImageFile(ch, msg, query)
 		return
 	}
-	// Otherwise fuzzy-match image filenames under the working dir.
+	// Otherwise fuzzy-match by filename stem: strip the directory and extension
+	// from the input so a missing/mistyped full path still matches by its name
+	// part (e.g. "D:\foo\report.png" -> match files whose name contains "report").
 	wd := r.workDirFor(sess)
-	hits := fuzzyMatchImages(wd, query)
+	key := filepath.Base(query)
+	if ext := filepath.Ext(key); ext != "" {
+		key = strings.TrimSuffix(key, ext)
+	}
+	if key == "" {
+		key = query
+	}
+	hits := fuzzyMatchImages(wd, key)
 	if len(hits) == 0 {
 		r.sendReply(msg, fmt.Sprintf("未找到匹配“%s”的图片，请用完整路径或换个关键字。", query))
 		return
