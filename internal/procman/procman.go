@@ -27,9 +27,14 @@ import (
 // Bare ESC: ESC followed by a single byte (not [ or ])
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b\][^\x1b]*\x1b\\|\x1b[^\[].`)
 
-// claudeEnvKeys 列出 claude 子进程启动所依赖的关键环境变量。
-// LogClaudeEnv 会在 linkcode 启动时报告它们的来源，便于排查"启动 claude 失败"。
-var claudeEnvKeys = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"}
+// claudeAuthKeys 是 claude 子进程的认证变量。API_KEY（Anthropic 官方）与
+// AUTH_TOKEN（第三方兼容端点，如智谱 GLM）二选一即可，故两者任一存在即视为已配置。
+var claudeAuthKeys = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"}
+
+// claudeRequiredKeys 是 claude 子进程必需的端点/模型变量，缺失则可能无法启动。
+// LogClaudeEnv 会在 linkcode 启动时报告 claudeAuthKeys 与 claudeRequiredKeys 的来源，
+// 便于排查"启动 claude 失败"。
+var claudeRequiredKeys = []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL"}
 
 // Process wraps a running agent subprocess.
 type Process struct {
@@ -150,16 +155,39 @@ func classifyEnv(key string, fileEnv map[string]string) envSource {
 	return envMissing
 }
 
+// reportEnv 报告单个关键环境变量的来源，命中（文件或系统）返回 true。
+func reportEnv(k string, fileEnv map[string]string) bool {
+	switch classifyEnv(k, fileEnv) {
+	case envFromFile:
+		log.Printf("[procman] %s: from file config (agent.env)", k)
+		return true
+	case envFromSystem:
+		log.Printf("[procman] %s: from system env", k)
+		return true
+	default:
+		log.Printf("[procman] %s: not set", k)
+		return false
+	}
+}
+
 // LogClaudeEnv 在 linkcode 启动时报告 claude 子进程关键环境变量的来源，
 // 便于排查"启动 claude 失败"。实际注入仍由 Start 完成（os.Environ + extraEnv 覆盖）。
+// 认证变量 API_KEY/AUTH_TOKEN 二选一即可；端点/模型变量必需。
 func LogClaudeEnv(fileEnv map[string]string) {
-	for _, k := range claudeEnvKeys {
-		switch classifyEnv(k, fileEnv) {
-		case envFromFile:
-			log.Printf("[procman] %s: from file config (agent.env)", k)
-		case envFromSystem:
-			log.Printf("[procman] %s: from system env", k)
-		case envMissing:
+	// 认证：API_KEY（官方）与 AUTH_TOKEN（第三方兼容端点）二选一。
+	authOK := false
+	for _, k := range claudeAuthKeys {
+		if reportEnv(k, fileEnv) {
+			authOK = true
+		}
+	}
+	if !authOK {
+		log.Printf("[procman] WARNING: neither ANTHROPIC_API_KEY nor ANTHROPIC_AUTH_TOKEN set (neither agent.env nor system env) — claude subprocess may fail to authenticate")
+	}
+
+	// 端点/模型：必需。
+	for _, k := range claudeRequiredKeys {
+		if !reportEnv(k, fileEnv) {
 			log.Printf("[procman] WARNING: %s not set (neither agent.env nor system env) — claude subprocess may fail to start", k)
 		}
 	}

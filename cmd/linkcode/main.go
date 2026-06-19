@@ -171,7 +171,7 @@ func main() {
 	priceCalc := pricing.New(cfg.Agent.Pricing)
 	statusMgr := router.NewStatusManager(gw, sessionMgr)
 	rtr := router.New(sessionMgr, botPool, agentRunner, gw, statusMgr, imStyler, priceCalc)
-	ctrl := controller.New(sessionMgr, botPool, gw, imStyler, cfg.Agent.ClaudeCodePath, rtr, rtr)
+	ctrl := controller.New(sessionMgr, botPool, gw, imStyler, rtr, rtr)
 
 	// Wire worker bot handlers globally via gateway.
 	gw.SetWorkerMessageHandler(func(msg channel.Message) {

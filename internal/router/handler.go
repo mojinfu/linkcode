@@ -5,6 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +35,8 @@ func (r *Router) handleCommand(msg channel.Message, sess *session.Session) {
 		r.handleResetDefaultWorkDir(msg, sess)
 	case "/workdir":
 		r.handleWorkDir(msg, sess)
+	case "/img":
+		r.handleSendImage(msg, sess)
 	case "/help":
 		r.handleHelp(msg)
 	default:
@@ -166,9 +172,136 @@ func (r *Router) handleHelp(msg channel.Message) {
 			"\"/stop\"                中断 Agent 正在进行的思考\n"+
 			"\"/workdir\"             让 Claude 回答当前实际的工作目录\n"+
 			"\"/resetdefaultworkdir\" 设定此 Agent 默认工作目录\n"+
+			"\"/img\"                 发送图片：/img 图片路径（仅本机 png/jpg/gif）\n"+
 			"\"/help\"                显示本帮助\n"+
 			"\n直接发文字消息即可与 Agent 对话")
 	r.sendReply(msg, help)
+}
+
+// handleSendImage sends a local image file as a WeCom image reply. If the
+// argument isn't an exact path, it fuzzy-matches image filenames under the
+// session's working dir; multiple hits are listed as 1..N and the user picks by
+// replying a number (see consumeImageChoice).
+// WeCom only allows images as replies (aibot_respond_msg with the incoming
+// message's reqID), never proactive pushes.
+func (r *Router) handleSendImage(msg channel.Message, sess *session.Session) {
+	query := strings.TrimSpace(strings.TrimPrefix(msg.Content, "/img"))
+	query = strings.Trim(query, "\"'")
+	if query == "" {
+		r.sendReply(msg, "用法：/img <图片路径或名称关键字>\n示例：/img D:\\x.png  或  /img logo\n支持 png/jpg/jpeg/gif，≤10MB")
+		return
+	}
+	ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
+	if !ok || !ch.IsConnected() {
+		r.sendReply(msg, "连接已断开，正在重连，请稍后重试。")
+		return
+	}
+	// Exact path → send directly.
+	if _, err := os.Stat(query); err == nil {
+		r.sendImageFile(ch, msg, query)
+		return
+	}
+	// Otherwise fuzzy-match image filenames under the working dir.
+	wd := r.workDirFor(sess)
+	hits := fuzzyMatchImages(wd, query)
+	if len(hits) == 0 {
+		r.sendReply(msg, fmt.Sprintf("未找到匹配“%s”的图片，请用完整路径或换个关键字。", query))
+		return
+	}
+	if len(hits) == 1 {
+		r.sendImageFile(ch, msg, hits[0])
+		return
+	}
+	// Multiple hits → list and wait for a numeric pick.
+	r.mu.Lock()
+	r.pendingImageChoices[sess.ID] = hits
+	r.mu.Unlock()
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("找到 %d 张相似图片，回复数字选择：\n", len(hits)))
+	for i, h := range hits {
+		rel, err := filepath.Rel(wd, h)
+		if err != nil {
+			rel = h
+		}
+		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, rel))
+	}
+	r.sendReply(msg, sb.String())
+}
+
+// consumeImageChoice handles a numeric reply that selects a fuzzy-matched image.
+// Returns true if the message was consumed as an image pick (a valid number while
+// a choice is pending); otherwise clears any stale pending choice and returns
+// false so normal handling proceeds.
+func (r *Router) consumeImageChoice(msg channel.Message, sess *session.Session) bool {
+	r.mu.Lock()
+	hits := r.pendingImageChoices[sess.ID]
+	if hits == nil {
+		r.mu.Unlock()
+		return false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(msg.Content))
+	if err != nil || n < 1 || n > len(hits) {
+		delete(r.pendingImageChoices, sess.ID)
+		r.mu.Unlock()
+		return false
+	}
+	chosen := hits[n-1]
+	delete(r.pendingImageChoices, sess.ID)
+	r.mu.Unlock()
+
+	ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
+	if !ok || !ch.IsConnected() {
+		r.sendReply(msg, "连接已断开，正在重连，请稍后重试。")
+		return true
+	}
+	r.sendImageFile(ch, msg, chosen)
+	return true
+}
+
+// sendImageFile sends one image file as a reply and confirms via text.
+func (r *Router) sendImageFile(ch channel.Channel, msg channel.Message, path string) {
+	if err := ch.SendImage(context.Background(), msg.UserID, msg.ReqID, path); err != nil {
+		r.sendReply(msg, fmt.Sprintf("发送图片失败：%v", err))
+		return
+	}
+	r.sendReply(msg, "已发送："+filepath.Base(path))
+}
+
+// workDirFor returns the effective working directory for a session's bot.
+func (r *Router) workDirFor(sess *session.Session) string {
+	bot, _ := r.botPool.GetByID(sess.BoundBotID)
+	botWD := ""
+	if bot != nil {
+		botWD = bot.WorkDir
+	}
+	wd, _ := r.botPool.ResolveWorkDir(botWD)
+	return wd
+}
+
+// fuzzyMatchImages walks dir and returns up to 10 image files whose name
+// contains query (case-insensitive). Only image extensions are considered.
+func fuzzyMatchImages(dir, query string) []string {
+	q := strings.ToLower(query)
+	var hits []string
+	_ = filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		switch strings.ToLower(filepath.Ext(p)) {
+		case ".png", ".jpg", ".jpeg", ".gif":
+		default:
+			return nil
+		}
+		if strings.Contains(strings.ToLower(info.Name()), q) {
+			hits = append(hits, p)
+		}
+		return nil
+	})
+	sort.Strings(hits)
+	if len(hits) > 10 {
+		hits = hits[:10]
+	}
+	return hits
 }
 
 // handleLLM forwards a text message to the agent and streams the response back.
@@ -268,8 +401,8 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 	spinnerRunes := []rune(spinnerFrames)
 	spinnerIconIdx := 0
 	spinnerDotIdx := 0
-	spinnerInterval := spinnerMaxInterval
-	ticker := time.NewTicker(spinnerInterval)
+	idleIdx := 0 // index into idleRefreshSchedule; advances as the agent stays idle
+	ticker := time.NewTicker(idleRefreshSchedule[0])
 	defer ticker.Stop()
 
 	var cache streamCache
@@ -320,8 +453,9 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 				if !r.sendStreamReply(msg, buildStatusBar()+"\n"+cache.textBuf.String(), streamID, false) {
 					streamBroken = true
 				}
-				spinnerInterval = spinnerMinInterval
-				ticker.Reset(spinnerInterval)
+				// Tokens are flowing again — restart the schedule from the fast end.
+				idleIdx = 0
+				ticker.Reset(idleRefreshSchedule[0])
 			case agent.KindQuestion:
 				cache.question = chunk.Question
 			case agent.KindFinal:
@@ -352,8 +486,8 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 				goto done // final=success: ignore subsequent non-zero exit chunk (e.g. BigModel compat)
 			case agent.KindThinking, agent.KindToolUse:
 				if chunk.Content != "" {
-					spinnerInterval = spinnerMinInterval
-					ticker.Reset(spinnerInterval)
+					idleIdx = 0
+					ticker.Reset(idleRefreshSchedule[0])
 				}
 			}
 		case <-processTimeout:
@@ -374,14 +508,13 @@ func (r *Router) streamToUser(msg channel.Message, sess *session.Session, output
 			if cache.textBuf.Len() > 0 {
 				frameText += "\n" + cache.textBuf.String()
 			}
-			if spinnerInterval < spinnerMaxInterval {
-				spinnerInterval += spinnerDecelStep
-				if spinnerInterval > spinnerMaxInterval {
-					spinnerInterval = spinnerMaxInterval
-				}
-				ticker.Reset(spinnerInterval)
-			}
-			log.Printf("[router] ticker frame icon=%d dots=%d interval=%v", spinnerIconIdx%len(spinnerRunes), spinnerDotIdx%4, spinnerInterval)
+			// Advance through the schedule and loop back to the fast start once
+			// exhausted. One full loop (30 frames / ~62s ≈ 29/min) stays under
+			// WeCom's 30-msgs/min, and looping keeps the cadence lively instead
+			// of sticking at the slow tail.
+			idleIdx = (idleIdx + 1) % len(idleRefreshSchedule)
+			ticker.Reset(idleRefreshSchedule[idleIdx])
+			log.Printf("[router] ticker frame icon=%d dots=%d interval=%v", spinnerIconIdx%len(spinnerRunes), spinnerDotIdx%4, idleRefreshSchedule[idleIdx])
 			if !r.sendStreamReply(msg, frameText, streamID, false) {
 				log.Printf("[router] ticker send failed, marking stream broken")
 				streamBroken = true
