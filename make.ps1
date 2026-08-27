@@ -18,7 +18,7 @@ Options:
 
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("build", "run", "restart", "stop", "status", "clean")]
+    [ValidateSet("build", "run", "restart", "stop", "status", "clean", "mysql", "mysql-stop")]
     [string]$Target = "build",
 
     [switch]$Daemon
@@ -206,6 +206,42 @@ function Invoke-Clean {
 }
 
 # ============================================================================
+# MySQL management
+# ============================================================================
+$MysqlDataDir = "C:\Users\xudeyi\mysql-data"
+$MysqldExe     = "C:\Program Files\MySQL\MySQL Server 8.4\bin\mysqld.exe"
+
+function Invoke-MysqlStart {
+    Write-Step "Starting MySQL..."
+    $existing = Get-Process -Name mysqld -ErrorAction SilentlyContinue
+    if ($existing) {
+        Write-Host "  MySQL already running (pid $($existing.Id))." -ForegroundColor Green
+        return
+    }
+    $proc = Start-Process -FilePath $MysqldExe `
+        -ArgumentList "--datadir=$MysqlDataDir" `
+        -WindowStyle Hidden -PassThru
+    Start-Sleep -Seconds 3
+    if ($proc.HasExited) {
+        Write-Err "MySQL failed to start (exit code $($proc.ExitCode))."
+        exit 1
+    }
+    Write-OK "MySQL started (pid $($proc.Id))."
+}
+
+function Invoke-MysqlStop {
+    Write-Step "Stopping MySQL..."
+    $existing = Get-Process -Name mysqld -ErrorAction SilentlyContinue
+    if (-not $existing) {
+        Write-Host "  MySQL not running."
+        return
+    }
+    $existing | Stop-Process -Force
+    Start-Sleep -Seconds 1
+    Write-OK "MySQL stopped."
+}
+
+# ============================================================================
 # dispatch
 # ============================================================================
 
@@ -216,4 +252,6 @@ switch ($Target) {
     "stop"    { Invoke-Stop }
     "status"  { Invoke-Status }
     "clean"   { Invoke-Clean }
+    "mysql"       { Invoke-MysqlStart }
+    "mysql-stop"  { Invoke-MysqlStop }
 }

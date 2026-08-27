@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"linkcode/internal/agent"
@@ -77,6 +78,7 @@ type Router struct {
 	sessionUsage        map[int64]*sessionUsageRec  // sessionID -> cumulative token usage
 	pendingImageChoices map[int64][]string          // sessionID -> fuzzy-matched image candidates awaiting a numeric pick
 	pricingCalc         pricing.Calculator
+	doneSeq             atomic.Int64 // incremented per proactive "done" push to vary the ZWSP suffix
 }
 
 // sessionUsageRec accumulates token usage across turns for a session.

@@ -130,10 +130,6 @@ encrypt_key: ""               # AES-256 key for bot secrets (auto-generated if e
 
 | Variable | Overrides |
 |----------|-----------|
-| `LINKCODE_DB_DSN` | MySQL connection string |
-| `LINKCODE_CONTROL_BOT_ID` | Control bot platform ID |
-| `LINKCODE_CONTROL_BOT_SECRET` | Control bot secret |
-| `LINKCODE_ENCRYPT_KEY` | AES-256 encryption key (hex) |
 | `LINKCODE_DEEPSEEK_PROXY_ADDR` | DeepSeek proxy listen address |
 | `ANTHROPIC_BASE_URL` | If contains "deepseek", starts a local compatibility proxy |
 

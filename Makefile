@@ -22,7 +22,7 @@ SHELL := D:/apps/git/Git/bin/sh.exe
 # 不能用 command -v 的输出——那会返回 MSYS 路径 /c/Windows/...,原生 make 直执行时找不到。
 PW := $(shell if command -v pwsh >/dev/null 2>&1; then echo pwsh; else echo powershell; fi)
 
-.PHONY: build run restart stop status clean
+.PHONY: build run restart stop status clean mysql mysql-stop
 
 build:
 	$(PW) -File make.ps1 build
@@ -68,6 +68,12 @@ status:
 clean:
 	$(PW) -File make.ps1 clean
 
+mysql:
+	$(PW) -File make.ps1 mysql
+
+mysql-stop:
+	$(PW) -File make.ps1 mysql-stop
+
 help:
 	@echo "linkcode make targets:"
 	@echo "  make run             编译 + 前台启动"
@@ -83,3 +89,5 @@ help:
 	@echo "  make stop            停止"
 	@echo "  make status          查看状态"
 	@echo "  make clean           清理编译产物"
+	@echo "  make mysql           后台启动 MySQL（数据目录: ~/mysql-data/）"
+	@echo "  make mysql-stop      停止 MySQL"

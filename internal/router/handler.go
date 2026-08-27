@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -37,11 +38,92 @@ func (r *Router) handleCommand(msg channel.Message, sess *session.Session) {
 		r.handleWorkDir(msg, sess)
 	case "/img":
 		r.handleSendImage(msg, sess)
+	case "/cmd":
+		r.handleRunFile(msg)
 	case "/help":
 		r.handleHelp(msg)
 	default:
 		r.sendReply(msg, fmt.Sprintf("未知命令: %s。发送 /help 查看可用命令。", cmd))
 	}
+}
+
+const (
+	// cmdExecTimeout bounds a /cmd run so a hanging script can't wedge the router.
+	cmdExecTimeout = 5 * time.Minute
+	// cmdOutputMaxLen caps the result message length for WeCom.
+	cmdOutputMaxLen = 4000
+)
+
+// handleRunFile executes a local file triggered by /cmd <path>. It acknowledges
+// immediately, then runs the file in a goroutine (so a slow script can't block
+// message draining) and proactively pushes the full result when done. Proactive
+// push is used because the reply stream (aibot_respond_msg) tied to the original
+// message can expire (846608) during a long run.
+func (r *Router) handleRunFile(msg channel.Message) {
+	path := strings.Trim(strings.TrimSpace(strings.TrimPrefix(msg.Content, "/cmd")), `"'`)
+	if path == "" {
+		r.sendReply(msg, "用法：/cmd <文件路径>\n支持 .ps1 / .bat / .cmd / .exe")
+		return
+	}
+	shell, args, ok := cmdInvocation(path)
+	if !ok {
+		r.sendReply(msg, fmt.Sprintf("不支持的文件类型：%s\n支持 .ps1 / .bat / .cmd / .exe", filepath.Ext(path)))
+		return
+	}
+	if shell == "" {
+		shell = path // .exe: run directly
+	}
+
+	r.sendReply(msg, fmt.Sprintf("开始执行 %s ...", path))
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), cmdExecTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, shell, args...)
+		cmd.Dir = filepath.Dir(path) // scripts resolve relative paths from their own dir
+		out, err := cmd.CombinedOutput()
+		text := buildCmdResult(path, out, err)
+		ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
+		if ok && ch.IsConnected() {
+			if err := ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
+				Text:   text,
+				ChatID: msg.ChatID,
+			}); err != nil {
+				log.Printf("[router] /cmd result push: %v", err)
+			}
+		}
+	}()
+}
+
+// cmdInvocation maps a file extension to how it should be executed. An empty
+// shell means the file is run directly (executable). ok is false for unsupported
+// extensions.
+func cmdInvocation(path string) (shell string, args []string, ok bool) {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".ps1":
+		return "powershell", []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path}, true
+	case ".bat", ".cmd":
+		// Go's CreateProcess auto-quotes args containing spaces, so cmd /c
+		// receives the path correctly quoted even with spaces in it.
+		return "cmd", []string{"/c", path}, true
+	case ".exe":
+		return "", nil, true
+	}
+	return "", nil, false
+}
+
+// buildCmdResult formats the combined output of a /cmd run for a WeCom message,
+// truncating overly long output and appending a note.
+func buildCmdResult(path string, out []byte, err error) string {
+	var b strings.Builder
+	if err != nil {
+		fmt.Fprintf(&b, "执行失败：%v\n\n", err)
+	}
+	b.Write(out)
+	text := b.String()
+	if len(text) > cmdOutputMaxLen {
+		text = text[:cmdOutputMaxLen] + fmt.Sprintf("\n...(已截断，共 %d 字节)", len(out))
+	}
+	return text
 }
 
 // handleStop interrupts the running agent process for this session.
@@ -178,6 +260,7 @@ func (r *Router) handleHelp(msg channel.Message) {
 			"\"/workdir\"             让 Claude 回答当前实际的工作目录\n"+
 			"\"/resetdefaultworkdir\" 设定此 Agent 默认工作目录\n"+
 			"\"/img\"                 发送图片：/img 图片路径（仅本机 png/jpg/gif）\n"+
+			"\"/cmd\"                 执行本机文件：/cmd <路径>\n"+
 			"\"/help\"                显示本帮助\n"+
 			"\n直接发文字消息即可与 Agent 对话")
 	r.sendReply(msg, help)
@@ -583,12 +666,40 @@ done:
 			r.pendingQuestions[sess.ID] = cache.question
 			r.mu.Unlock()
 			r.sendQuestionMenu(msg, cache.question)
+		} else {
+			// Task finished with no pending question — proactively push a
+			// "done" so the phone gets a notification. The [✓] stand by
+			// reply above only updates the chat bubble and doesn't push.
+			r.sendDonePush(msg)
 		}
 	}
 
 	if responseText != "" {
 		_ = r.sessionMgr.AddMessage(sess.ID, "agent", responseText, "text")
 	}
+}
+
+// sendDonePush proactively pushes a short "done" message after a turn completes
+// normally. The [✓] stand by reply (aibot_respond_msg) only updates the chat
+// bubble and doesn't trigger a phone notification; a proactive aibot_send_msg
+// does. It runs in a goroutine so a slow ack never blocks queued-message
+// draining. The ZWSP suffix varies per push so WeCom doesn't dedup identical
+// "done" messages.
+func (r *Router) sendDonePush(msg channel.Message) {
+	ch, ok := r.gw.GetWorkerByPlatformID(msg.BotID)
+	if !ok || !ch.IsConnected() {
+		return
+	}
+	seq := r.doneSeq.Add(1)
+	text := "done" + r.styler.DiffSuffix(int(seq))
+	go func() {
+		if err := ch.SendMessage(context.Background(), msg.UserID, channel.MessageContent{
+			Text:   text,
+			ChatID: msg.ChatID,
+		}); err != nil {
+			log.Printf("[router] sendDonePush: %v", err)
+		}
+	}()
 }
 
 // buildCostLine returns a cost display string for the standby bar.

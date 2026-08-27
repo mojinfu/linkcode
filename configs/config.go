@@ -83,20 +83,6 @@ func Load(path string) (Config, error) {
 		return cfg, fmt.Errorf("configs: parse %s: %w", path, err)
 	}
 
-	// Override with environment variables (highest priority).
-	if v := os.Getenv("LINKCODE_DB_DSN"); v != "" {
-		cfg.DB.DSN = v
-	}
-	if v := os.Getenv("LINKCODE_CONTROL_BOT_ID"); v != "" {
-		cfg.ControlBot.BotID = v
-	}
-	if v := os.Getenv("LINKCODE_CONTROL_BOT_SECRET"); v != "" {
-		cfg.ControlBot.Secret = v
-	}
-	if v := os.Getenv("LINKCODE_ENCRYPT_KEY"); v != "" {
-		cfg.EncryptKey = v
-	}
-
 	// Fallback: load encryption key from local file if not in config.
 	if cfg.EncryptKey == "" {
 		keyFile := "configs/.encrypt_key"
