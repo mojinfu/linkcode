@@ -13,9 +13,12 @@
 #
 # 脚本逻辑在 make.ps1 中，支持 PowerShell Core (pwsh) 和 Windows PowerShell。
 
-# 强制使用 Git Bash 的 sh，避免 Windows 下 make 默认用 cmd.exe
+# Windows 下 GNU make 默认用 cmd.exe 当 shell，强制改用 Git Bash 的 sh；
+# Linux/macOS 默认就是 /bin/sh，无需覆盖（硬编码 Windows 路径会让 Linux 上 make 直接报错）。
+ifeq ($(OS),Windows_NT)
 SHELL := D:/apps/git/Git/bin/sh.exe
 .SHELLFLAGS := -c
+endif
 
 # 自动检测 pwsh / powershell
 # 用裸名(pwsh/powershell),让 GnuWin32 make 的 CreateProcess 走 Windows PATH 解析;
