@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -62,16 +63,16 @@ const (
 func (r *Router) handleRunFile(msg channel.Message) {
 	path := strings.Trim(strings.TrimSpace(strings.TrimPrefix(msg.Content, "/cmd")), `"'`)
 	if path == "" {
-		r.sendReply(msg, "用法：/cmd <文件路径>\n支持 .ps1 / .bat / .cmd / .exe")
+		r.sendReply(msg, "用法：/cmd <文件路径>\n"+cmdSupportText())
 		return
 	}
 	shell, args, ok := cmdInvocation(path)
 	if !ok {
-		r.sendReply(msg, fmt.Sprintf("不支持的文件类型：%s\n支持 .ps1 / .bat / .cmd / .exe", filepath.Ext(path)))
+		r.sendReply(msg, fmt.Sprintf("不支持的文件类型：%s\n%s", filepath.Ext(path), cmdSupportText()))
 		return
 	}
 	if shell == "" {
-		shell = path // .exe: run directly
+		shell = path // direct execution (Windows .exe; non-Windows any executable)
 	}
 
 	r.sendReply(msg, fmt.Sprintf("开始执行 %s ...", path))
@@ -94,10 +95,14 @@ func (r *Router) handleRunFile(msg channel.Message) {
 	}()
 }
 
-// cmdInvocation maps a file extension to how it should be executed. An empty
-// shell means the file is run directly (executable). ok is false for unsupported
-// extensions.
+// cmdInvocation maps a file to how it should be executed. An empty shell means
+// the file is run directly (executable). ok is false for unsupported extensions.
+// On Windows the extension decides (scripts run via their shell, .exe directly);
+// on other platforms any file is run directly, relying on shebang + exec bit.
 func cmdInvocation(path string) (shell string, args []string, ok bool) {
+	if runtime.GOOS != "windows" {
+		return "", nil, true // run directly (shebang/exec bit)
+	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".ps1":
 		return "powershell", []string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path}, true
@@ -109,6 +114,14 @@ func cmdInvocation(path string) (shell string, args []string, ok bool) {
 		return "", nil, true
 	}
 	return "", nil, false
+}
+
+// cmdSupportText describes the /cmd file types accepted on this platform.
+func cmdSupportText() string {
+	if runtime.GOOS == "windows" {
+		return "支持 .ps1 / .bat / .cmd / .exe"
+	}
+	return "支持任意可执行文件（脚本需含 shebang 且有执行权限）"
 }
 
 // buildCmdResult formats the combined output of a /cmd run for a WeCom message,
