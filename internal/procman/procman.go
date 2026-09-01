@@ -312,6 +312,12 @@ func (p *Process) readStderr(stderr io.Reader) {
 		if line == "" {
 			continue
 		}
+		// claude 内部诊断行（如 [claude-code:unrecognized_model]）不是用户可见错误，
+		// 只在服务端记录，避免被 router 当致命错误推给手机并掐断整个回复。
+		if strings.HasPrefix(line, "[claude-code:") {
+			log.Printf("[procman] claude diagnostic (filtered): %s", line)
+			continue
+		}
 		select {
 		case p.output <- agent.OutputChunk{
 			Kind:    agent.KindError,

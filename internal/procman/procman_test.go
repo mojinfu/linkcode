@@ -826,6 +826,64 @@ func TestStart_StderrOnly(t *testing.T) {
 	}
 }
 
+// TestStart_FiltersClaudeDiagnostic verifies that claude internal diagnostic
+// lines (prefix [claude-code:) are not forwarded as KindError (they'd abort the
+// response stream via the router), while plain stderr lines still forward.
+func TestStart_FiltersClaudeDiagnostic(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	dir := t.TempDir()
+
+	fakeBin := filepath.Join(dir, "fakeclaude_diagnostic")
+	if runtime.GOOS == "windows" {
+		fakeBin += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", fakeBin, "testdata/fakeclaude_diagnostic/main.go")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build fake claude diagnostic: %v\n%s", err, out)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	proc, err := Start(ctx, fakeBin, dir, "", nil)
+	if err != nil {
+		t.Fatalf("Start() failed: %v", err)
+	}
+
+	outputCh, err := proc.Send(ctx, `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}`)
+	if err != nil {
+		t.Fatalf("Send() failed: %v", err)
+	}
+
+	var errors []string
+	for chunk := range outputCh {
+		if chunk.Kind == agent.KindError {
+			errors = append(errors, chunk.Content)
+		}
+	}
+
+	// The diagnostic line must not surface as an error.
+	for _, e := range errors {
+		if strings.Contains(e, "unrecognized_model") {
+			t.Errorf("claude diagnostic leaked to KindError: %s", e)
+		}
+	}
+
+	// A real stderr line must still be forwarded.
+	found := false
+	for _, e := range errors {
+		if strings.Contains(e, "ERROR: real problem") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("real stderr line not forwarded; errors: %v", errors)
+	}
+}
+
 // TestStart_InstantExitNoOutput verifies procman behavior when a process
 // exits immediately with code 1 and produces zero stdout/stderr.
 func TestStart_InstantExitNoOutput(t *testing.T) {
